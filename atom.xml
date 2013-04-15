@@ -1,0 +1,798 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+ 
+ <title>Moukarram Kabbash</title>
+ <link href="http://mouk.github.io/atom.xml" rel="self"/>
+ <link href="http://mouk.github.io/"/>
+ <updated>2013-04-15T11:52:50+02:00</updated>
+ <id>http://mouk.github.io</id>
+ <author>
+   <name>Moukarram Kabbash</name>
+ </author>
+ 
+ 
+ <entry>
+   <title>Extending NServiceBus</title>
+   <link href="http://mouk.github.io/2010/09/13/extending-nservicebus/"/>
+   <updated>2010-09-13T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2010/09/13/extending-nservicebus</id>
+   <content type="html">&lt;p&gt;&lt;a href=&quot;http://nservicebus.com/&quot;&gt;NServicecBus&lt;/a&gt; is a very popular enterprise service bus (ESB) for the .NET framework. In this article I will analyze the extensibility facility of NSB, what you can do with it and what you can’t. &lt;/p&gt;  &lt;p&gt;Suppose for now we have the a very simple application that sends messages from one endpoint to another. We want to extend the NSB framework to do the following:&lt;/p&gt;  &lt;ul&gt;   &lt;li&gt;Outgoing message should be checked for confidential information – like credit card numbers – and censored if necessary. &lt;/li&gt;    &lt;li&gt;Messages of some specific kind should be augmented with copy right notices. &lt;/li&gt;    &lt;li&gt;Some messages should be prevented from being send. As an alternative, a simple notice message should be sent instead. &lt;/li&gt;    &lt;li&gt;The outgoing bytes should be compressed and encrypted. &lt;/li&gt;    &lt;li&gt;The incoming bytes should be decrypted and decompress before dispatching to the message handlers. &lt;/li&gt; &lt;/ul&gt;  &lt;p&gt;To achieve those requirements I started analyzing the UnicastBus class, which is responsible to taking the message processing them before sending them using the configured transport. &lt;/p&gt;  &lt;p&gt;The first extensible point I found was the IMessageModule interface. Classes that implement this interfaces should implement three functions that represents the three different points in the lifecycle of a message handler. Those functions are executed before processing a message, afterwards and afterwards if a problem happened. The biggest short come of this approach&amp;#160; is that the functions take no parameters. You don’t know which messages are being processed, you don’t have access to the bus to send messages on your own. If you know the &lt;a href=&quot;http://msdn.microsoft.com/en-us/magazine/ff872394.aspx&quot;&gt;Alexandria&lt;/a&gt; application you will be very disappointed.&amp;#160; Cool things like caching responses and sending them when a matched request is sent is not possible. I’m not sure when to use IMessageHanlder interface. The only usage I’m aware of is &lt;a href=&quot;http://andreasohlund.blogspot.com/2010/02/nhibernate-session-management-in.html&quot;&gt;managing NHibernate sessions&lt;/a&gt;.&amp;#160; The plus side of this interfaces is its easy to use. Just inject all implementations in your IoC Container of choice I you’re cool. NServiceBus will retrieve and call them for you. As I figured out, almost all extensibility points works in same way. Just implement an interface, inject the implementation in the container and you’re done.&lt;/p&gt;  &lt;p&gt;The second interface that could be used to grant you access to&amp;#160; message processing pipeline is the interface pair IMutateIncomingMessages and IMutateOutgoingMessages. &lt;/p&gt;  &lt;p&gt;The IMutateOutgoingMessages interface has only one method:&lt;/p&gt;  &lt;pre class=&quot;brush: csharp;&quot;&gt;IMessage MutateOutgoing(IMessage message);&lt;/pre&gt;
+
+&lt;p&gt;As you see you don’t just have write access to the message, you have to return the modified you. This can be used to return a wholly different message.&lt;/p&gt;
+
+&lt;p&gt;The following snippet shows how to watch sent messages and censor all messages containing the word “Visa”.&lt;/p&gt;
+
+&lt;pre class=&quot;brush: csharp;&quot;&gt;public IMessage MutateOutgoing(IMessage message)
+{
+    var msg = (message as EventMessage);
+    if (msg == null)
+        return message;
+
+    if (msg.Text.ToLower().Contains(&amp;quot;visa&amp;quot;))
+    {
+        return new CensoredMessage
+                   {
+                       Text = &amp;quot;Message has been censored!&amp;quot;
+                   };
+    }
+    return msg;
+}&lt;/pre&gt;
+
+&lt;p&gt;Even though you couldn’t prevent sending the message, you can send a replacement message that do pretty nothing. If you have multiple mutators and you would like to execute them in defined order, just introduce them to the container in the same order. IoC containers usually return items in the same order they we configured in.&lt;/p&gt;
+
+&lt;p&gt;Accordingly&amp;#160; IMutateIncopmingMessage do the same to the received messages. &lt;/p&gt;
+
+&lt;p&gt;&amp;#160;&lt;/p&gt;
+
+&lt;p&gt;What we could not do with those interfaces is compressing the outgoing bytes to spare bandwidth.&lt;/p&gt;
+
+&lt;p&gt;To do this you have to use the IMapOutgoingTransportMessages interface. Having single method &lt;/p&gt;
+
+&lt;pre class=&quot;brush: csharp;&quot;&gt;void MapOutgoing(IMessage[] messages, TransportMessage transportMessage)&lt;/pre&gt;
+
+&lt;p&gt;it grants you access to original logic messages as well to the serialized bytes.TansportMessage give also an access to the message headers. Those headers could be used to set meta data that can be useful when decompressing the messages.&lt;/p&gt;
+
+&lt;p&gt;Using this method we could implement the following compression service&lt;/p&gt;
+
+&lt;p&gt;&amp;#160;&lt;/p&gt;
+
+&lt;pre class=&quot;brush: csharp;&quot;&gt;void MapOutgoing(IMessage[] messages, TransportMessage transportMessage)
+{
+
+    if (!ShouldCompressMessage(transportMessage))
+        return;
+
+    transportMessage.Headers[&amp;quot;zipped&amp;quot;] = &amp;quot;1&amp;quot;;
+
+    byte[] output;
+    var inputData = transportMessage.Body;
+
+    using (var inMemoryStream = new MemoryStream(inputData))
+    using (var outMemoryStream = new MemoryStream())
+    {
+        using (var zipStream = new DeflateStream(outMemoryStream, CompressionMode.Compress,leaveOpen: true))
+        {
+            inMemoryStream.WriteTo(zipStream);
+            zipStream.Flush();
+        }
+        output = outMemoryStream.ToArray();
+    }
+    transportMessage.Body = output;
+}
+
+private bool ShouldCompressMessage(TransportMessage transportMessage)
+{
+    return transportMessage.Body.Length &amp;gt; 300;
+}&lt;/pre&gt;
+
+&lt;p&gt;Now to the other side of communication. All we have to do to decompress the messages is implementing IMapIncomingTransportMessages, isn’t it? I was very surprised to discover that there is no such an interface. I can’t imagine why there is an IMapOutgoingTransportMessages&amp;#160; interface but no IMapIncomingTransportMessages. I guess it must be on the way. Nevertheless NSB is open source and you can add this interface by your self. Simply by adding the interface and calling its implementations using the container in the right place I could undo the compressing and continue process the message, as if there were no compression at all. &lt;/p&gt;
+
+&lt;pre class=&quot;brush: csharp;&quot;&gt;void MapIncoming(TransportMessage transportMessage)
+{
+    if (!transportMessage.Headers.ContainsKey(&amp;quot;zipped&amp;quot;))
+        return;
+
+    byte[] output;
+    using (var inMemoryStream = new MemoryStream(transportMessage.Body))
+    using (var zipStream = new DeflateStream(inMemoryStream, CompressionMode.Decompress,leaveOpen: true))
+    {
+        using (var strea = new MemoryStream())
+        {
+            zipStream.CopyTo(strea);
+            output = strea.ToArray();
+        }
+    }
+    transportMessage.Body = output;
+    transportMessage.Headers.Remove(&amp;quot;zipped&amp;quot;);
+}&lt;/pre&gt;
+
+&lt;p&gt;That’s all, folks.&amp;#160; Using those techniques you can hook your own processing pipeline to the default pipeline of NSB without (big) modifications to the NSB source code. &lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Pro .NET 4 Parallel Programming in C#. Book Review.</title>
+   <link href="http://mouk.github.io/2010/08/16/pro-net-4-parallel-programming-in-c-book-review/"/>
+   <updated>2010-08-16T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2010/08/16/pro-net-4-parallel-programming-in-c-book-review</id>
+   <content type="html">&lt;p&gt;&lt;em&gt;Disclaimer&lt;/em&gt;: This is my first book review and I am definitely not a book critic.&amp;#160; I don’t know which criteria should a good book satisfy or what makes a book better than another, at least from a formal point of view. All what I can tell you is how useful it was for me.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;&lt;a href=&quot;http://apress.com/book/view/9781430229674&quot;&gt;The Pro .NET 4 Parallel Programming&lt;/a&gt; book is written by Adam Freeman and published by &lt;a href=&quot;http://apress.com/&quot;&gt;APress&lt;/a&gt;.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;The book is divided by into 8 chapters:&lt;/p&gt;  &lt;p&gt;The first chapter is, what a surprise, the introduction. It answers such questions like why should you care about concurrency and parallel programming.&lt;/p&gt;  &lt;p&gt;The second chapter introduces the Task class of the Task Parallel Library (&lt;a href=&quot;http://msdn.microsoft.com/de-de/library/dd460717.aspx&quot;&gt;TPL&lt;/a&gt;) and handles almost all aspects of using it; like staring , cancellation, coordination and handling exceptions of tasks. This chapter makes you love tasks and wish you have never worked with threads.&lt;/p&gt;  &lt;p&gt;The third and fourth chapters are about sharing data and coordinating tasks in more details. Those two chapters are what make this book a book about real world problems. You see in this chapter how solve real problems with shared data and control flow. You don’t do solve just embarrassingly parallel problems. Free lunch is over! The subjects in those chapters include locking primitives, signaling other tasks /thread to do work. All of that in great details.&lt;/p&gt;  &lt;p&gt;The second two chapters are about parallel loops and parallel Linq. It handles the specialties of those aspects like breaking from a parallel loop or managing order while using parallel Linq. &lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;The seventh chapter is about testing and debugging. It shows the new capabilities in Visual Studio 2010, its strengths and weaknesses and how to make use of them.&lt;/p&gt;  &lt;p&gt;The last chapter is a great prologue. It shows how to use the TPL to implement well known algorithms like quick sort and MapReduce. &lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;After this small summary of the book I will show the things I liked and things I didn’t. &lt;/p&gt;  &lt;p&gt;Lets start with the positive side of this parallel coin.&lt;/p&gt;  &lt;p&gt;Pros:&lt;/p&gt;  &lt;ol&gt;   &lt;li&gt;All mentioned aspects are handled in great details. If its tasks coordination, you will know how to wait for tasks, how to start a new task after another task finished successfully or with an exception and how to cancel scheduled tasks. Synchronization Primitives are handled in all details. How to use them, when to use the slim version of them, etc.&lt;/li&gt;    &lt;li&gt;At the end of each chapter there is a section about common problems and their causes.&amp;#160; You learn which conditions produce such pitfalls and how to avoid them. Actually I have never heard about some of them. I found this chapter to be invaluable. &lt;/li&gt;    &lt;li&gt;The practical last chapter helps you solving the jigsaw and orchestrating the small parts of the previous chapters to build real world solutions.&lt;/li&gt; &lt;/ol&gt;  &lt;p&gt;Cons&lt;/p&gt;  &lt;ol&gt;   &lt;li&gt;I’m not sure if this behavior is intended, but this book is merely about the TPL. All introduces techniques, with exception of the Synchronization Primitives maybe, are from the TPL. Threads are mentioned only sparely as way to manage tasks scheduling. Did threads become useless (at least to work directly with)? Are ThreadPools obsolete?&amp;#160; I don’t know.&amp;#160; I wish the book mentioned that explicitly.&lt;/li&gt;    &lt;li&gt;The Monitor class has only been mentioned in conjuction with locking objects, but you could use it for other things, like wait and pulsing. I’m not sure if you could simulate this behavior with [(a Manual)|(an Auto)]-ResetEvent. But this should have been mentioned. &lt;/li&gt;    &lt;li&gt;The book has its own convention in naming namespaces, classes and private methods.&amp;#160; The namespace Speculative_Cache and class name&amp;#160; Use_Speculative_Cache do not conform to the established conventions. Starting private methods with small letter is also not very common in the .Net world. &lt;/li&gt; &lt;/ol&gt;  &lt;p&gt;Summary&lt;/p&gt;  &lt;p&gt;A great book about the TPL. If you are a .NET programmer&amp;#160; then you should read it.&amp;#160; If you think you don’t have to because you will not be needing parallel programming in your daily job then you are the most suitable audience for this book. Your programs will perform better if you learned how make independent small chunks&amp;#160; run independently. &lt;/p&gt;  &lt;p&gt;Happy reading!&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Harmful Abstractions</title>
+   <link href="http://mouk.github.io/2010/08/09/harmful-abstractions/"/>
+   <updated>2010-08-09T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2010/08/09/harmful-abstractions</id>
+   <content type="html">&lt;p&gt;Abstraction is a key concept in computer science and math. Abstraction in computer science is the art of hiding details. It could be as simple as the getc() C function that return a single char from some source. That is, the user key strokes, a text file, etc, or a very complicated abstraction like the 7 layers of the ISO TCP protocol. When using the getc() function you are ignoring where the retrieved char come from. It also means that you have, usually, no way of knowing where it comes from. Hence, abstractions are not only ignoring and hiding details.&lt;/p&gt;  &lt;p&gt;Modern software is build as a pyramid of abstraction layers. When writing a an application in C#, for instance, you are using an abstraction layer above&amp;#160; the intermediate language (IL). The IL is an abstraction layer&amp;#160; above the the native environment, which, in turn, is&amp;#160; an abstraction layer above the von Neumann computation model. The von Neumann computation model, is an abstraction layer above the electronic gates, which hide the details of current and electrons.&amp;#160; It your software uses the Internet you are very likely to use a framework that abstract the whole abstraction layers of TCP protocol (technically your application resides in the 7th layer - the application layer - of TCP layer. Nevertheless, you have multiple abstraction layer inside it).&lt;/p&gt;  &lt;p&gt;It is safe to claim that, without those abstraction layer, writing modern software will be kind of self torturing.&lt;/p&gt;  &lt;p&gt;Anyway, this article is not about how useful&amp;#160; are abstractions. It’s about how harmful then can be, when used wrongly. The reason why abstracts could be dangerous lies in the fact, that they may hide important details. Such details could cause the system to stop behaving as expected.&amp;#160; When ignoring details, you are saying “I don’t care about the details because my system will work the same, regardless of the actual detail. Actually this is a very important principle of the S.O.L.I.D priciples: the “Liskov substitution principle”.&amp;#160; This principle states “&lt;i&gt;Let &lt;/i&gt;&lt;i&gt;q&lt;/i&gt;(&lt;i&gt;x&lt;/i&gt;) be a property provable about objects &lt;i&gt;x&lt;/i&gt; of type &lt;i&gt;T&lt;/i&gt;. Then &lt;i&gt;q&lt;/i&gt;(&lt;i&gt;y&lt;/i&gt;) should be true for objects &lt;i&gt;y&lt;/i&gt; of type &lt;i&gt;S&lt;/i&gt; where &lt;i&gt;S&lt;/i&gt; is a subtype of &lt;i&gt;T&lt;/i&gt;.”&lt;/p&gt;  &lt;p&gt;In this definition T is an abstraction over S.&amp;#160; Assuming S´is another subtype of T, this principle doesn’t say that q(x) &amp;lt;=&amp;gt; q(x’), for all instances x from S and s´from S´. To use other words, when defining an abstract you are defining the properties you want to have in all subtypes. Mixing defined with assumed common behavior leads to serious problems. A funny Poster about the LSP states: &lt;a href=&quot;http://www.lostechies.com/blogs/derickbailey/archive/2009/02/11/solid-development-principles-in-motivational-pictures.aspx&quot;&gt;If it looks like a duck, quacks like a duck, but have batteries – you have properly the wrong abstraction.&lt;/a&gt;&lt;/p&gt;  &lt;p&gt;Is the rest of this post I will show some harmful abstraction that led/ could lead to dangerous behavior.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;h1&gt;Databases are memory collections&lt;/h1&gt;  &lt;p&gt;This abstract has been usually pushed by the raise of the Domain Driven Design (DDD) which encourage persistence&amp;#160; ignorance (PI).&amp;#160; The famous pattern of the PI is the repository pattern which hides the database access details behind a slick interface with few simple methods like : GettAll(), GetById(), etc. This pattern is really great for unit testing. Abstracting the data access layer enables&amp;#160; to replace the database with an in-memory collection of the entities which results in a huge performance hit compared to the accessing the database and, more important, to predictable behavior. &lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;h2&gt;Performance problems&lt;/h2&gt;  &lt;p&gt;The problems start to appear usually after you have established the infra structure of you architecture, usually too late.The problem with this abstraction is that databases don’t work like memory. Navigation from an object to another in the database is not nearly the same as in memory. Round trips to database are far more time consuming than in memory.&amp;#160; Getting too much object from the database is too expensive. All serious&amp;#160; ORM provide lazy loading to load dependencies of some object on demand. To be mainstream conform I will demonstrate this behavior using the blog post with comments example. Loading the blog post from the database doesn’t mean you want to have all comments. This could be worst if the post has attachments in the database. Loading them&amp;#160; is not only slow but could also&amp;#160; be memory exhaustive. Such sub objects could be lazy loaded, i.e. on demand. Now assume you want show the blog post with all its comments. Lazy loading them is known as the select N+1 Problem. The ORM has to query the database N times, that is one time for each comment, and the first time to retrieve the blog post. &lt;/p&gt;  &lt;p&gt;If you ignore this issue it bite you later. And it will bite hard!&amp;#160; Not wanting ti discard your beautiful repository and the nice unit tests with the memory collections to try to solve this dilemma adding new specialized functions to the repository. For retrieving all post with comments you add:&lt;/p&gt;  &lt;p&gt;GetAllWithComments()&lt;/p&gt;  &lt;p&gt;The same problems happen again and again and each time you add a new method to the repository.&amp;#160; The beautiful slick is ain’t slick and beautiful any more. It get bloated with many methods like:&lt;/p&gt;  &lt;p&gt;GetAllWithCommentsPaged(); &lt;/p&gt;  &lt;p&gt;GetAllWithCommntsAndAuthorsPaged();&lt;/p&gt;  &lt;p&gt; Get ByTag(); &lt;/p&gt;  &lt;p&gt;GetByTagWithComments(); &lt;/p&gt;  &lt;p&gt;GetByTagWithCommentsPaged(); &lt;/p&gt;  &lt;p&gt;You name it.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;h2&gt;Context problems&lt;/h2&gt;  &lt;p&gt;Many ORM embed the database context inside persisted object to keep the connection to the database to retrieve sub object and persist updated value. The context provides further context features like&amp;#160; object lifecycle, transactions, etc.&amp;#160; The consequence of this coupling between objects and content causes the persisted object to depend strongly on the the context. It is not enough for a service class to receive a list of blog posts to calculate the average comments count per one post. I has to assume that the comments are all loaded eagerly, or the context is not disposed. It means also that you can not keep the database object in the memory between requests if you wish you modify them later of navigate in the object graph.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;h1&gt;Remote calls&lt;/h1&gt;  &lt;p&gt;Remote calls are calls to a resource on a remote process, remote computer on the same network or a call over the internet. Such calls are afflicted&amp;#160; with long latency.&amp;#160; If you wish to avoid slowing down you application you can all them asynchronously, i.e. starting the call and registering a callback to be executed when the call has terminated. Problems start when&amp;#160; you try to hide the distributed nature of your call. If all what you are doing is calling a webservice to get the weather data and show them on you home page your cool. You can hide the webservice call behind an IWeatherIno interface and nevermind how it works. Of course the latency of you site with get at least as big as the called webservice latency, but no problem. It works!&lt;/p&gt;  &lt;p&gt;Now imagine a more complicated situation with many distributed processes.&amp;#160; If a communication partner is waiting for few partners to answer its calls the system will get very slow. And that’s not all. It can get even worse. Deadlocks could render the system unusable.&amp;#160; To demonstrate this situation let us consider the starbucks example. This example demonstrate how multiple process could communicate with each other over a long term to accomplish a business transaction.&lt;/p&gt;  &lt;p&gt;A transaction at starbuck involves three actors: a customer, a barista and a cashier. The customer starts the transaction by ordering a drink from the barista. The barista starts making the drink an notify the cashier to bill it. The cashier asks the customer to pay for the drink. The customer pays for the drink. After receiving the payment the cashier notify the barista, which deliver the drink to the customer.&lt;/p&gt;  &lt;p&gt;Executing this transaction in the same process yield no problems. The execution flows from object to other as method calls until the initial call of the customer to order a drink terminates.&amp;#160; All needed is one thread.&lt;/p&gt;  &lt;p&gt;Now trying to hide the distributed nature &lt;strike&gt;could&lt;/strike&gt; will lead to the following deadlock:&lt;/p&gt;  &lt;p&gt;The clients orders a drink and the thread blocks waiting for the asynchronous call to return. As described previously the cashier request the customer to pay. The customer cannot reply because its thread is blocked waiting to the ordering call to terminate, which in turn will not terminate until the payment is done. Every one is blocked waiting for some call to return.&amp;#160; Of course you could assign a second thread to the customer. But what he is ordering two drinks simultaneously? This is a fairly simple example. In a real world&amp;#160; distributed application you will have many of such service calling each other. Abstracting the asynchronous calls behind an interface would harm your system. &lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;h1&gt;Hiding the stateless nature of the http protocol&lt;/h1&gt;  &lt;p&gt;The http Protocol used for the&amp;#160; web communication is stateless by nature. That is, each http connection is new connection that contains no information about previous connections. Classical ASP.NET tried to&amp;#160; get rid of this limitation by using an abstraction layer over the protocol that enables stateful web control.&amp;#160; preserving the state of web page by rendering a huge amount of redundant data the get exchanged each timer between the browser and server. &lt;/p&gt;  &lt;p&gt;ASP.NET Also tried to abstract the html behind an object oriented, component based model which failed frequently. The hidden details about the true nature of html could not be ignored without losing of control over the feel and look of the rendered pages&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;I’ve tried in this article to demonstrate how abstract could be harmful if used inappropriately. Consider you abstraction carefully and never assume. And remember if it looks like a duck, quacks like a duck, but have batteries – you have properly the wrong abstraction ;)&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Solving the Countdown Numbers Problem with F#</title>
+   <link href="http://mouk.github.io/2010/02/25/solving-the-countdown-numbers-problem-with-f/"/>
+   <updated>2010-02-25T00:00:00+01:00</updated>
+   <id>http://mouk.github.io/2010/02/25/solving-the-countdown-numbers-problem-with-f</id>
+   <content type="html">&lt;p&gt;Countdown Problem is a game from the UK TV described in the following &lt;a href=&quot;http://www.cs.nott.ac.uk/~gmh/countdown.pdf&quot;&gt;link&lt;/a&gt; (PDF).&amp;#160; Basically, giving a set of numbers&amp;#160; and a single number, you have to use the arithmetic&amp;#160; operation to build a expression of the given numbers (in any subset and order) , that evaluate to the specified number.&amp;#160;&amp;#160; I will call this task in this article “The Countdown Problem”, since using the word “Problem” makes it sounds more as an academic (or as a homework , see the first comment on my &lt;a href=&quot;http://stackoverflow.com/questions/1563271/3d-bin-packing-algorithm&quot;&gt;question&lt;/a&gt; on Stackoverflow).&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;I came across this Problem after watching the &amp;quot;Functional Programming Fundamentals” &lt;a href=&quot;http://channel9.msdn.com/shows/Going+Deep/Lecture-Series-Erik-Meijer-Functional-Programming-Fundamentals-Chapter-1/&quot;&gt;series&lt;/a&gt; on Channel9, with Erik Mejer. &lt;a href=&quot;http://www.cs.nott.ac.uk/~gmh/&quot;&gt;Graham Hutton&lt;/a&gt; (the author of &lt;a href=&quot;http://www.cs.nott.ac.uk/~gmh/book.html&quot;&gt;Programming in Haskell&lt;/a&gt;) guest-hosted the 11th episode and showed how to solve this problem using brute force with Haskell. As I’m learning F# currently I started to implement the program in F# as well. Despite being heavily based on the Haskell solution from that episode, this code is not an accurate translation of the Haskell code. It just uses the same ideas.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;At first let us make a structure to hold the possible operations:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:8134d21b-f087-411f-a68a-f8475133ca75&quot; class=&quot;wlWriterEditableSmartContent&quot;&gt;&lt;div style=&quot;font-family:consolas,lucida console,courier,monospace&quot;&gt;
+&lt;span style=&quot;color:#008000&quot;&gt;&lt;b&gt;type&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Op&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#666666&quot;&gt;=&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Add&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#666666&quot;&gt;|&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Sub&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#666666&quot;&gt;|&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Mul&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#666666&quot;&gt;|&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Div&lt;/b&gt;&lt;/span&gt;&lt;br /&gt;
+&lt;/div&gt;
+&lt;/div&gt;  &lt;p&gt;This kind of types is called &lt;a href=&quot;http://msdn.microsoft.com/en-us/library/dd233226(VS.100).aspx&quot;&gt;discriminated unions&lt;/a&gt; which means that an instance of this type is one of the named cases. An operation could be any of the following cases: Addition, Subtraction, multiplication or division.&lt;/p&gt;  &lt;p&gt;The second type is an arithmetic expression, which may either be an integer or two expressions combined using an operation from the previous ones:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:fd51dbeb-f806-48d1-b9bc-ae122239b7d0&quot; class=&quot;wlWriterEditableSmartContent&quot;&gt;&lt;div style=&quot;font-family:consolas,lucida console,courier,monospace&quot;&gt;
+&lt;span style=&quot;color:#008000&quot;&gt;&lt;b&gt;type&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Expr&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#666666&quot;&gt;=&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Val&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#008000&quot;&gt;&lt;b&gt;of&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#B00040&quot;&gt;int&lt;/span&gt;&amp;#160;&lt;br /&gt;
+&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&lt;span style=&quot;color:#666666&quot;&gt;|&lt;/span&gt;&amp;#160;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;App&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#008000&quot;&gt;&lt;b&gt;of&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Op&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#666666&quot;&gt;*&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Expr&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#666666&quot;&gt;*&lt;/span&gt;&amp;#160;&lt;span style=&quot;color:#0000FF&quot;&gt;&lt;b&gt;Expr&lt;/b&gt;&lt;/span&gt;&lt;br /&gt;
+&lt;/div&gt;
+&lt;/div&gt;  &lt;p&gt;Boy, I love discriminated unions ;)&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;Now we have the structures to hold the possible combinations, we still have to generate then in some way. For a set of numbers&amp;#160; we have to generate all possible subsets, and for each of those subsets all permutations have to be generated. Its obvious that this task can be composed from two separate functions: building subsets and permutating them.&lt;/p&gt;  &lt;p&gt;The first function generate all subsets of the set of numbers:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:d78262cc-7d71-4adc-8e55-2355970c4962&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;div style=&quot;font-family: consolas,lucida console,courier,monospace&quot;&gt;     &lt;br /&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;rec&lt;/b&gt;&lt;/span&gt; subSets items &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;       &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;match&lt;/b&gt;&lt;/span&gt; items &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;with&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;[]&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt; seq&lt;span style=&quot;color: #666666&quot;&gt;{&lt;/span&gt;yield &lt;span style=&quot;color: #008000&quot;&gt;[]&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;}&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt; x&lt;span style=&quot;color: #666666&quot;&gt;::&lt;/span&gt;xs &lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt; seq&lt;span style=&quot;color: #666666&quot;&gt;{&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt; sub &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt; subSets xs&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; yield&lt;span style=&quot;color: #666666&quot;&gt;!&lt;/span&gt; sub&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; yield&lt;span style=&quot;color: #666666&quot;&gt;!&lt;/span&gt; sub &lt;span style=&quot;color: #666666&quot;&gt;|&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Seq&lt;/b&gt;&lt;/span&gt;.map &lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;fun&lt;/b&gt;&lt;/span&gt; l &lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt; x&lt;span style=&quot;color: #666666&quot;&gt;::&lt;/span&gt;l&lt;span style=&quot;color: #666666&quot;&gt;)&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;}&lt;/span&gt;&lt;/p&gt;   &lt;/div&gt; &lt;/div&gt;  &lt;p&gt;This exploits the simple idea that for each element of the set there are two almost identical categories of subsets;&amp;#160; subsets that include this element, and the matching subsets that don’t. This could be exploited using an inductive approach to generate the subsets of small sets and then adding new elements successively to those sets.&amp;#160; This function returns a sequence instead of an instance of Set because the number of subsets is exponential to the number of elements in the original set.&amp;#160; Sequences are lazy evaluated, and thus consume less memory. There are 2&lt;sup&gt;n&lt;/sup&gt; subsets of any set of n elements.&lt;/p&gt;  &lt;p&gt;The Second function generates for a giving set&amp;#160; alls possible permutations:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:dddd41bf-874d-4005-81c7-f6f8b0027f7d&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;div style=&quot;font-family: consolas,lucida console,courier,monospace&quot;&gt;     &lt;br /&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;rec&lt;/b&gt;&lt;/span&gt; permutations items &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;       &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;match&lt;/b&gt;&lt;/span&gt; items &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;with&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;[]&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt; seq&lt;span style=&quot;color: #666666&quot;&gt;{&lt;/span&gt;yield &lt;span style=&quot;color: #008000&quot;&gt;[]&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;}&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;_&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt;&amp;#160; seq&lt;span style=&quot;color: #666666&quot;&gt;{&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; x &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; items &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt; oth &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;[&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; c &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; items &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;if&lt;/b&gt;&lt;/span&gt; c &lt;span style=&quot;color: #666666&quot;&gt;&amp;lt;&amp;gt;&lt;/span&gt; x &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;then&lt;/b&gt;&lt;/span&gt; yield c &lt;span style=&quot;color: #666666&quot;&gt;]&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; yield&lt;span style=&quot;color: #666666&quot;&gt;!&lt;/span&gt; permutations oth &lt;span style=&quot;color: #666666&quot;&gt;|&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Seq&lt;/b&gt;&lt;/span&gt;.map &lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;fun&lt;/b&gt;&lt;/span&gt; l &lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt; x&lt;span style=&quot;color: #666666&quot;&gt;::&lt;/span&gt;l&lt;span style=&quot;color: #666666&quot;&gt;)&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;}&lt;/span&gt;&lt;/p&gt;   &lt;/div&gt; &lt;/div&gt;  &lt;p&gt;This function returns n! different permutations for each set of n elements.&lt;/p&gt;  &lt;p&gt;Now we can compose both methods to retrieve a method that generates all permutations of all subsets of a given set:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:f0580702-8ba5-460d-8379-64f917f81eda&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;div style=&quot;font-family: consolas,lucida console,courier,monospace&quot;&gt;     &lt;br /&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt; choices items &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;&amp;#160; &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; seq&lt;span style=&quot;color: #666666&quot;&gt;{&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; x &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; subSets items &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&amp;#160;&amp;#160;&amp;#160; &lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; yield&lt;span style=&quot;color: #666666&quot;&gt;!&lt;/span&gt; permutations x &lt;span style=&quot;color: #666666&quot;&gt;}&lt;/span&gt;&lt;/p&gt;   &lt;/div&gt; &lt;/div&gt;  &lt;p&gt;Given a set of n elements, this function returns n!.2&lt;sup&gt;n&lt;/sup&gt; different choices, which is a huge number. For n=6 choices yields&amp;#160; 46080&amp;#160; elements.&lt;/p&gt;  &lt;p&gt;After building all possible permutated subsets of the number set there is still many ways to combine them into an arithmetic expression.&amp;#160; An arithmetic could be represented as a binary tree. Each node in this tree is an operation and the leaves are numbers. Building a binary tree could be done by splitting combining both binary trees into one with a single root node. This could be repeated recursively for all possible sub trees and possible splitting points to generate all binary trees:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:6160ad60-4275-456d-8259-5b6e79adf241&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;div style=&quot;font-family: consolas,lucida console,courier,monospace&quot;&gt;     &lt;br /&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;rec&lt;/b&gt;&lt;/span&gt; generateExpressions nums &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;       &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;match&lt;/b&gt;&lt;/span&gt; nums &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;with&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;[]&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Seq&lt;/b&gt;&lt;/span&gt;.empty&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|[&lt;/span&gt;a&lt;span style=&quot;color: #666666&quot;&gt;]&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt; seq&lt;span style=&quot;color: #666666&quot;&gt;{&lt;/span&gt;yield &lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Val&lt;/b&gt;&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;a&lt;span style=&quot;color: #666666&quot;&gt;)}&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|_-&amp;gt;&lt;/span&gt;seq&lt;span style=&quot;color: #666666&quot;&gt;{&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; posnum &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; choices nums &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;f&lt;span style=&quot;color: #666666&quot;&gt;,&lt;/span&gt;s&lt;span style=&quot;color: #666666&quot;&gt;)&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; split posnum &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; first &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; generateExpressions f &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; second &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; generateExpressions s &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; op &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;[&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Add&lt;/b&gt;&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;;&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Sub&lt;/b&gt;&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;;&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Mul&lt;/b&gt;&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;;&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Div&lt;/b&gt;&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;]&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; yield &lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;App&lt;/b&gt;&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;op&lt;span style=&quot;color: #666666&quot;&gt;,&lt;/span&gt;first&lt;span style=&quot;color: #666666&quot;&gt;,&lt;/span&gt;second&lt;span style=&quot;color: #666666&quot;&gt;)}&lt;/span&gt;&lt;/p&gt;   &lt;/div&gt; &lt;/div&gt;  &lt;p&gt;This yields an enormous number of binary trees. For a fixed number of leaves n one could construct (2n)! /((n+a)!n!) different trees.&amp;#160;&amp;#160; We will see in a coming article how to reduce this number by avoiding redundant expressions because of the commutatively of adding and multiplication.&amp;#160;&amp;#160; “split” is the function that splits a list into two non trivial list without changing the order of elements.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;Now we move to the evaluating arithmetical expressions.&amp;#160; The function “eval” takes an expression and returns an list of integers. This is a common technique when programming in Haskell to express Null. If the expression is valid the function will evaluate it and return a singleton listing containing the result otherwise it will return an empty list.&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:3cf8654f-cc70-4b80-9145-95be8e71b910&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;div style=&quot;font-family: consolas,lucida console,courier,monospace&quot;&gt;     &lt;br /&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;rec&lt;/b&gt;&lt;/span&gt; eval expr &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;       &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;match&lt;/b&gt;&lt;/span&gt; expr &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;with&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Val&lt;/b&gt;&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;n&lt;span style=&quot;color: #666666&quot;&gt;)&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;[&lt;/span&gt;n&lt;span style=&quot;color: #666666&quot;&gt;]&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;App&lt;/b&gt;&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;op&lt;span style=&quot;color: #666666&quot;&gt;,&lt;/span&gt; left&lt;span style=&quot;color: #666666&quot;&gt;,&lt;/span&gt; right&lt;span style=&quot;color: #666666&quot;&gt;)&lt;/span&gt;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt;&amp;#160;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;[&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; l &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; eval left &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; r &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; eval right &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;if&lt;/b&gt;&lt;/span&gt; valid op l r &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;then&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; yield apply op l r&lt;span style=&quot;color: #666666&quot;&gt;]&lt;/span&gt;&lt;/p&gt;   &lt;/div&gt; &lt;/div&gt;  &lt;p&gt;“valid” is a simple function that ensure that all intermediate results are natural numbers. If valid of sum expression returned false all tree containing the sub tree of this expression are invalid.:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:c721418c-3404-461c-8ff7-d125f99766c6&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;div style=&quot;font-family: consolas,lucida console,courier,monospace&quot;&gt;     &lt;br /&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt; valid op f s&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;&amp;#160; &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;match&lt;/b&gt;&lt;/span&gt; op &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;with&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Add&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;true&lt;/span&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Sub&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt; f &lt;span style=&quot;color: #666666&quot;&gt;&amp;gt;=&lt;/span&gt; s&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Mul&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;true&lt;/span&gt;&amp;#160;&amp;#160; &lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&lt;/span&gt;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Div&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;-&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;s &lt;span style=&quot;color: #666666&quot;&gt;&amp;lt;&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;0&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;)&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;&amp;amp;&amp;amp;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;f &lt;span style=&quot;color: #666666&quot;&gt;%&lt;/span&gt; s &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;0&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;)&lt;/span&gt;&amp;#160;&amp;#160; &lt;/p&gt;   &lt;/div&gt; &lt;/div&gt;  &lt;p&gt;Now we have all necessary tools to iterate thru all possible combinations and returning the&amp;#160; ones which matching result:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:875c5af6-fb12-4320-aadf-b1c21562e7eb&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;div style=&quot;font-family: consolas,lucida console,courier,monospace&quot;&gt;     &lt;br /&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;let&lt;/b&gt;&lt;/span&gt; solutions nums result &lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;       &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; seq &lt;span style=&quot;color: #666666&quot;&gt;{&lt;/span&gt;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;for&lt;/b&gt;&lt;/span&gt; ex &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;in&lt;/b&gt;&lt;/span&gt; generateExpressions nums &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;do&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;if&lt;/b&gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;(&lt;/span&gt;eval ex &lt;span style=&quot;color: #666666&quot;&gt;|&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Seq&lt;/b&gt;&lt;/span&gt;.to_list&lt;span style=&quot;color: #666666&quot;&gt;)&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;=&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;[&lt;/span&gt;result&lt;span style=&quot;color: #666666&quot;&gt;]&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #008000&quot;&gt;&lt;b&gt;then&lt;/b&gt;&lt;/span&gt;&lt;/p&gt;      &lt;p&gt;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160;&amp;#160; yield ex&lt;span style=&quot;color: #666666&quot;&gt;}&lt;/span&gt;&lt;/p&gt;   &lt;/div&gt; &lt;/div&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;Running this function on the same input as the one presented in the Haskell lecture of Hutton returns the same result:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:2EC9848E-067D-4e79-BAB7-06CA927DB962:75b8ba41-0232-4aa2-a175-b09cebf252ae&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;div style=&quot;font-family: consolas,lucida console,courier,monospace&quot;&gt;     &lt;br /&gt;solutions &lt;span style=&quot;color: #666666&quot;&gt;[&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;1&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;3&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;7&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;10&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;25&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;50&lt;/span&gt;&lt;span style=&quot;color: #666666&quot;&gt;]&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #666666&quot;&gt;765&lt;/span&gt;&amp;#160;&amp;#160;&amp;#160; &lt;p&gt;&amp;#160;&amp;#160;&amp;#160; &lt;span style=&quot;color: #666666&quot;&gt;|&amp;gt;&lt;/span&gt;&amp;#160;&lt;span style=&quot;color: #0000ff&quot;&gt;&lt;b&gt;Seq&lt;/b&gt;&lt;/span&gt;.length&lt;/p&gt;   &lt;/div&gt; &lt;/div&gt;  &lt;p&gt;The only problem with this Algorithm is the runtime. It takes too much to calculate the result.&lt;/p&gt;  &lt;p&gt;Finding one solution is relative fast, but finding all results takes for ever. In the coming article I will try to reduce the runtime by avoiding redundant arithmetic expressions.&lt;/p&gt;  &lt;p&gt;The code exists on &lt;a href=&quot;http://github.com/mouk/Countdown&quot;&gt;http://github.com/mouk/Countdown&lt;/a&gt; and will be updated to reflect the planed changes.&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>A coupon for any Tekpub series to give away</title>
+   <link href="http://mouk.github.io/2010/01/10/a-coupon-for-any-tekpub-series-to-give-away/"/>
+   <updated>2010-01-10T00:00:00+01:00</updated>
+   <id>http://mouk.github.io/2010/01/10/a-coupon-for-any-tekpub-series-to-give-away</id>
+   <content type="html">&lt;p&gt;Justin Etheredge announced in his &lt;a href=&quot;http://www.codethinked.com/post/2010/01/10/Winners-of-the-TekPub-LINQ-Challenge.aspx&quot;&gt;post&lt;/a&gt; that I am one of the five winners of his LINQ &lt;a href=&quot;http://www.codethinked.com/post/2010/01/08/TekPubs-Mastering-LINQ-Challenge.aspx&quot;&gt;challenge&lt;/a&gt; accompanying his &lt;a href=&quot;http://www.tekpub.com/&quot;&gt;Tekpub&lt;/a&gt; &lt;a href=&quot;http://www.tekpub.com/view/linq/1&quot;&gt;series on LINQ&lt;/a&gt;.&lt;/p&gt;  &lt;p&gt;Since I already have a yearly subscription to Tekpub and because tomorrow is my 26th birthday I’m willing to give my coupon away ;-)&lt;/p&gt;  &lt;p&gt;As I have been using A LOT of open source projects lately and not participating with coding I want to give something back. If you are an active committer&amp;#160; in any active open source .Net (or jQuery)&amp;#160; project, just leave a comment with your OS project and wished series. I will get the coupon and forward it to you.&amp;#160; Active OS projects are … note very unknown project, you know?&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;== UPDTAE ==&lt;/p&gt;  &lt;p&gt;A coupon of “Mastering NHibernate” has already been sent to Krzysztof Koźmic. Have fun with it, Krzysztof :-)&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Mastering LINQ</title>
+   <link href="http://mouk.github.io/2010/01/09/mastering-linq/"/>
+   <updated>2010-01-09T00:00:00+01:00</updated>
+   <id>http://mouk.github.io/2010/01/09/mastering-linq</id>
+   <content type="html">&lt;p&gt;&lt;a href=&quot;http://www.tekpub.com/preview/linq&quot;&gt;Mastering LINQ&lt;/a&gt; is a new series on Tekpub.com, the Rob Conery site with, yet few, but very interesting screencast about new technologies.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;The host of Mastering LINQ, Justin Etheredge,&amp;#160; posted a challenge on his &lt;a href=&quot;http://www.codethinked.com/post/2010/01/08/TekPubs-Mastering-LINQ-Challenge.aspx&quot;&gt;site&lt;/a&gt;&amp;#160; promising the first five people to code a LINQ&amp;#160; query returning all primes of a sequence a single Tekpub screencast of choice.&lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;I gave it a try! It is really easy:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:d21be6a0-e3d1-48a3-a263-550ce944435f&quot; class=&quot;wlWriterEditableSmartContent&quot;&gt;&lt;pre name=&quot;code&quot; class=&quot;c#&quot;&gt;var n = 100;
+var primes = Enumerable.Range(1, n)
+    .Where(i =&amp;gt; i &amp;gt; 1)
+    .Where(i =&amp;gt;
+               {
+                   for (int j = 2; j &amp;lt;= Math.Sqrt(i); j++)
+                   {
+                       if (i%j == 0)
+                           return false;
+                   }
+                   return true;
+               }
+    );&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;&amp;#160;&lt;/p&gt;
+
+&lt;p&gt;Having a yearly subscription of Tekpub I don’t really need the price. I will give it away to some co-worker probably.&lt;/p&gt;
+
+&lt;p&gt;UPDATE:&lt;/p&gt;
+
+&lt;p&gt;The closure inside the where function could also be formulated using the “Range” and “All” method of the (I)Enumerable:&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:1a7cd1f3-bd26-4e03-b6b1-3974685c4bc7&quot; class=&quot;wlWriterEditableSmartContent&quot;&gt;&lt;pre name=&quot;code&quot; class=&quot;c#&quot;&gt;var primes2 = Enumerable.Range(1, n)
+    .Where(i =&amp;gt; i &amp;gt; 1)
+    .Where(i =&amp;gt; Enumerable
+                    .Range(2, (int) Math.Sqrt(i) - 1)
+                    .All(mod =&amp;gt; i%mod != 0)
+    );&lt;/pre&gt;&lt;/div&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Continuous Integration with TeamCity and MSBuild I</title>
+   <link href="http://mouk.github.io/2009/09/14/continuous-integration-with-teamcity-and-msbuild-i/"/>
+   <updated>2009-09-14T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2009/09/14/continuous-integration-with-teamcity-and-msbuild-i</id>
+   <content type="html">&lt;p&gt;‘To start this article let us cite the definition of Continuous Integration from Martin Fowler’s site:&lt;/p&gt;  &lt;blockquote&gt;   &lt;p&gt;&lt;i&gt;Continuous Integration is a software development practice where members of a team integrate their work frequently, usually each person integrates at least daily - leading to multiple integrations per day. Each integration is verified by an automated build (including test) to detect integration errors as quickly as possible. Many teams find that this approach leads to significantly reduced integration problems and allows a team to develop cohesive software more rapidly. This article is a quick overview of Continuous Integration summarizing the technique and its current usage.&lt;/i&gt;&lt;/p&gt; &lt;/blockquote&gt;  &lt;p&gt;I advice you to read the whole article about &lt;a href=&quot;http://martinfowler.com/articles/continuousIntegration.html&quot;&gt;Continuous Integration&lt;/a&gt; before you go on.&lt;/p&gt;  &lt;p&gt;For the sake of CI you need the following tools:&lt;/p&gt;  &lt;h3&gt;1 - A Build Server&lt;/h3&gt;  &lt;p&gt;&lt;a href=&quot;http://www.jetbrains.com/teamcity/&quot;&gt;TeamCity&lt;/a&gt; is very popular CI server from &lt;a href=&quot;http://www.jetbrains.com/&quot;&gt;JetBrains&lt;/a&gt;, the&amp;#160; creator of &lt;a href=&quot;http://www.jetbrains.com/resharper/&quot;&gt;ReSharper&lt;/a&gt;, IntelliJ, etc. I have had also used &lt;a href=&quot;http://cruisecontrol.sourceforge.net&quot;&gt;CruiseControl.NET&lt;/a&gt;, a free CI server from &lt;a href=&quot;http://www.thoughtworks.com/&quot;&gt;ThoughtWorks&lt;/a&gt;, but I liked TeamCity much more because of its friendly UI and distributed agents principle.&lt;/p&gt;  &lt;h3&gt;2 - Build Tool&lt;/h3&gt;  &lt;p&gt;&lt;a href=&quot;http://en.wikipedia.org/wiki/MSBuild&quot;&gt;MSBuild&lt;/a&gt; is an xml-based build platform from Microsoft that comes with the .NET framework. A build platform is some kind of DSL, that helps you to compile your code and do all other related stuff in one action. You could compile source code, execute tests, generate documentation, generate a deployable zip file, publish your web site to the server and almost everything else you may need to do with your code.&lt;/p&gt;  &lt;p&gt;Technically, you could write a batch file as you your build script and I have no doubt it will work and do every thing you wish. It just won’t be that convenient.&lt;/p&gt;  &lt;p&gt;&lt;a href=&quot;http://nant.sourceforge.net/&quot;&gt;NAnt&lt;/a&gt; is another popular build platform ported from Ant for the Java platform.&lt;/p&gt;  &lt;p&gt;Recently I have heard a lot about using Rake, the Ruby build tool, in the .NET world. &lt;a href=&quot;http://codebetter.com/blogs/james.kovacs/archive/2008/06/27/introducing-psake.aspx&quot;&gt;Psake&lt;/a&gt;&amp;#160; is another build automation tool written in PowerShell . &lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;p&gt;In this and few next posts I will configuring &lt;a href=&quot;http://www.jetbrains.com/teamcity/&quot;&gt;TeamCity&lt;/a&gt; to do a nightly build for &lt;a href=&quot;http://github.com/mouk/Stutali/tree&quot;&gt;Stutali&lt;/a&gt; , the task list generation tool, I introduced last in this &lt;a href=&quot;http://abstractast.com/2009/09/tasklist-generator/&quot;&gt;article&lt;/a&gt;.The task list generation task will be also included in the nightly build to process its own code and generate the task list.&lt;/p&gt;  &lt;h3&gt;Building the Build Script&lt;/h3&gt;  &lt;p&gt;The first step in configuring the build server is to add a build script to the project.&amp;#160; Because TeamCity supports sln files directly, a build script is technically not necessary if you just want to compile the project. Anyway if you want to perform some further building steps like processing&amp;#160; source code or deployment you will need the script.&lt;/p&gt;  &lt;p&gt;As already mentioned, MSBuild is the&amp;#160; technology that will be used in this article. The first and most important task is the bare compilation. For this task MSBuild needs only to know&amp;#160; where the sln file is.&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:a3607ab5-e967-4385-aba8-a30a0f173305&quot; class=&quot;wlWriterEditableSmartContent&quot;&gt;&lt;pre name=&quot;code&quot; class=&quot;xml&quot;&gt;&amp;lt;PropertyGroup&amp;gt;
+  &amp;lt;Configuration Condition=&quot; '$(Configuration)' == '' &quot;&amp;gt;Debug&amp;lt;/Configuration&amp;gt;
+  &amp;lt;ProjectDir&amp;gt;src&amp;lt;/ProjectDir&amp;gt;
+  &amp;lt;ProjectName&amp;gt;TasklistGenerator&amp;lt;/ProjectName &amp;gt;
+  &amp;lt;ProjectFile&amp;gt;$(ProjectName).sln&amp;lt;/ProjectFile &amp;gt;
+&amp;lt;/PropertyGroup&amp;gt;
+
+&amp;lt;Target Name=&quot;Build&quot; DependsOnTargets=&quot;Clean&quot;&amp;gt;
+    &amp;lt;MSBuild Projects=&quot;$(ProjectFile)&quot; Properties=&quot;Configuration=Debug&quot; /&amp;gt;
+&amp;lt;/Target&amp;gt;
+  &lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;The Property group section is the place where you define you constants. This could include the project name, tools path and every thing you may use at different places.&lt;/p&gt;
+
+&lt;h3&gt;TeamCity&lt;/h3&gt;
+
+&lt;p&gt;After testing the build script and pushing the code to the repository, we can start configuring TeamCity to do the CI work. At first we have to create a new project in the admin panel. This task is as easy as clicking through the wizard steps, filling out some text boxes and ready you are. TeamCity makes really pleasant. Out of the box is Git not supported. Anyway JetBrains has developed a plug-in to enable Git repositories. You have just to download this file from &lt;a href=&quot;http://www.jetbrains.net/confluence/display/TW/Git&quot;&gt;JetBrains&lt;/a&gt; and it to the place described.&lt;/p&gt;
+
+&lt;p&gt;&amp;#160;&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;http://abstractast.com/wp-content/uploads/2009/09/configrunner.jpg&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: inline; border-top-width: 0px; border-bottom-width: 0px; border-left-width: 0px&quot; title=&quot;TeamCity configuration runner msbuild&quot; border=&quot;0&quot; alt=&quot;TeamCity configuration runner msbuild&quot; src=&quot;http://abstractast.com/wp-content/uploads/2009/09/configrunner_thumb.jpg&quot; width=&quot;558&quot; height=&quot;331&quot; /&gt;&lt;/a&gt; &lt;/p&gt;
+
+&lt;p&gt;For the source code repository you should have been able to choose Git from the list after getting the Git plugin installed properly. &lt;/p&gt;
+
+&lt;p&gt;In the build triggering section you can specify when you want the build process to be started. Plausible options are either when the repository changes, i.e. when you push modification, or scheduled on a regular base, usually in the nightly, the so called nightly build. &lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;http://abstractast.com/wp-content/uploads/2009/09/configtigger.jpg&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: inline; border-top-width: 0px; border-bottom-width: 0px; border-left-width: 0px&quot; title=&quot;TeamCity configuration build triggering&quot; border=&quot;0&quot; alt=&quot;TeamCity configuration build triggering&quot; src=&quot;http://abstractast.com/wp-content/uploads/2009/09/configtigger_thumb.jpg&quot; width=&quot;558&quot; height=&quot;331&quot; /&gt;&lt;/a&gt; &lt;/p&gt;
+
+&lt;h3&gt;&amp;#160;&lt;/h3&gt;
+
+&lt;h3&gt;Artifacts&lt;/h3&gt;
+
+&lt;p&gt;Artifacts are any data items generated during the build process. Those could be binaries, documentation, reports, etc. Because of distributed nature of TeamCity, the actual compiling process doesn’t have to happen physically on the save machine as the TeamCity server. Thus, the artifacts you want to keep have to be specified explicitly, so that they be copied from the machine of the build agent and kept on the server.&lt;/p&gt;
+
+&lt;p&gt;Suppose for now the build script generates an html file containing the task list parsed from the source code and save it to CHECKOUT_FOLDER\&lt;em&gt;doc\tasklist.html&lt;/em&gt;.&amp;#160; If you want TeamCity to copy this file and make available for download in the artifacts tab of the build report, you have to specify it in the artifacts section&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;http://abstractast.com/wp-content/uploads/2009/09/configartifacts.png&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: inline; border-top-width: 0px; border-bottom-width: 0px; border-left-width: 0px&quot; title=&quot;TeamCity configuration artifacts&quot; border=&quot;0&quot; alt=&quot;TeamCity configuration artifacts&quot; src=&quot;http://abstractast.com/wp-content/uploads/2009/09/configartifacts_thumb.png&quot; width=&quot;558&quot; height=&quot;329&quot; /&gt;&lt;/a&gt; &lt;/p&gt;
+
+&lt;p&gt;If you want to add an alias to the copied artifacts, just use the =&amp;gt; syntax &lt;/p&gt;
+
+&lt;p&gt;&lt;em&gt;doc\tasklist.html =&amp;gt; tasks.html&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;You can also copy a whole folder of artifacts.&lt;/p&gt;
+
+&lt;p&gt;Now we are ready to go. Every thing is configured and we can trigger a test build. Just click the “run” that you see on almost every project page. If every thing went well you should see a new green line in the result page of the project.&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;http://abstractast.com/wp-content/uploads/2009/09/teamcity_overview_atrifacts.png&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: inline; border-top-width: 0px; border-bottom-width: 0px; border-left-width: 0px&quot; title=&quot;TeamCity overview artifacts&quot; border=&quot;0&quot; alt=&quot;TeamCity overview artifacts&quot; src=&quot;http://abstractast.com/wp-content/uploads/2009/09/teamcity_overview_atrifacts_thumb.png&quot; width=&quot;558&quot; height=&quot;330&quot; /&gt;&lt;/a&gt; &lt;/p&gt;
+
+&lt;p&gt;&amp;#160;&lt;/p&gt;
+
+&lt;h3&gt;Outlook&lt;/h3&gt;
+
+&lt;p&gt;It was just the start. What you can do in the CI process is only limited by your imagination and time. You could generate code metric reports, what we will do in the next posts, generate release binaries, push them to the download server, generate documentation,&amp;#160; push the new ASP.Net files to the server and precompile them, etc. &lt;/p&gt;
+
+&lt;p&gt;For the next posts, we will see how to integrate NDepend, NCover, FxCop and code documentation with the build process. &lt;/p&gt;
+
+&lt;p&gt;See you later!&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>JsonToDynamic: Consuming Json Data as Dynamic Objects in C# 4.0</title>
+   <link href="http://mouk.github.io/2009/09/12/jsontodynamic-consuming-json-data-as-dynamic-objects-in-c-4-0/"/>
+   <updated>2009-09-12T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2009/09/12/jsontodynamic-consuming-json-data-as-dynamic-objects-in-c-4-0</id>
+   <content type="html">About a month ago I was reading the early access edition of &lt;a href=&quot;http://www.manning.com/skeet2/&quot;&gt;C# in Depth, Second Edition&lt;/a&gt; from &lt;a href=&quot;http://msmvps.com/blogs/jon_skeet/default.aspx&quot;&gt;Jon Skeet&lt;/a&gt;. In this book the auto demonstrates using dynamic objects and the dynamic keyword in C# using a wrapper around an xml document. Suppose you have a xml document containing a number of books
+&lt;div id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:e67611ae-da2f-4bf9-bb7a-29c9e351cdb8&quot; class=&quot;wlWriterEditableSmartContent&quot; style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot;&gt;
+&lt;pre class=&quot;xml&quot;&gt;&amp;lt;book&amp;gt;
+	&amp;lt;autor&amp;gt;The Autor&amp;lt;/autor&amp;gt;
+&amp;lt;/boo&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+Now you can access the auto properties of each book in the following way:
+&lt;div id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:5fd41805-8f2d-480c-af64-1092399590a2&quot; class=&quot;wlWriterEditableSmartContent&quot; style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot;&gt;
+&lt;pre class=&quot;c#&quot;&gt;dynamic book = GetBookAsDynamic();
+string autoName = book.autor&lt;/pre&gt;
+&lt;/div&gt;
+Having been using Json intensively  the last few weeks and seeing how easy it is to consume Json in JavaScript, I thought dynamic object would be a fantastic way to make Json more natural in the .Net world. My favorite Json library is the &lt;a href=&quot;http://james.newtonking.com/pages/json-net.aspx&quot;&gt;Json.Net&lt;/a&gt;. Since, I started to code a wrapper about it.
+
+Suppose now you have such an object, that you have Json serialized:
+&lt;div id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:06d6fa5c-d1ed-469e-aabb-7f9ca85895d5&quot; class=&quot;wlWriterEditableSmartContent&quot; style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot;&gt;
+&lt;pre class=&quot;c#&quot;&gt;var obj = new
+{
+    Name = &quot;mouk&quot;,
+    FavoriteNames = new[] { &quot;mouk&quot;, &quot;dermouk&quot;, &quot;mouk9000&quot; },
+    NestedValues = new { First = 1, Second = 3, Nums = new[] { 1, 2, 3 } },
+    NestedArray = new object[]{ 1, 3, new[] { 100, 2, 3 } },
+    Age = 25,
+    Height = 180
+};
+
+var serializedObject = JsonConvert.SerializeObject(obj);&lt;/pre&gt;
+&lt;/div&gt;
+After deserializing it back to a dynamic object you can access as easy as:
+&lt;div id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:6f15e0d5-2847-4e9b-b646-f7d4395f7acf&quot; class=&quot;wlWriterEditableSmartContent&quot; style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot;&gt;
+&lt;pre class=&quot;c#&quot;&gt;dynamic _deserializedObject = JsonDeserilizer.GetObjectFromString(serializedObject);
+
+string name= _deserializedObject.Name;
+int age = _deserializedObject.Age;
+
+int nested = _deserializedObject.NestedArray[1];&lt;/pre&gt;
+&lt;/div&gt;
+&lt;h3&gt;Source Code&lt;/h3&gt;
+The source code of this wrapper can be downloaded from &lt;a title=&quot;http://github.com/mouk/JsonToDynamic/tree/master&quot; href=&quot;http://github.com/mouk/JsonToDynamic/tree/master&quot;&gt;http://github.com/mouk/JsonToDynamic/tree/master&lt;/a&gt;:
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Task List Generator</title>
+   <link href="http://mouk.github.io/2009/09/09/tasklist-generator/"/>
+   <updated>2009-09-09T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2009/09/09/tasklist-generator</id>
+   <content type="html">&lt;p align=&quot;left&quot;&gt;A Task list is the list, that VS generate for your code files including all special marker items like TODO, HACK, etc. Visual studio lists all those items in the tasks window in grid containing the description, file and line number.&amp;#160; Clicking an items in the tasks windows cause the editor to jump to this line in the code.&amp;#160; Unfortunately, visual studio show only tasks for opened file. Additionally, I thinks the number of task is a metric for code maturity and should be integrated in the continues integration process.&lt;/p&gt;  &lt;h3&gt;The Project&lt;/h3&gt;  &lt;p align=&quot;left&quot;&gt;After some googling with both Google and Bing I decided to do it myself. The only similar program I found, was the &lt;a href=&quot;http://wiki.hudson-ci.org/display/HUDSON/Task+Scanner+Plugin&quot;&gt;Task Scanner plug-in&lt;/a&gt; from the Hudson project.&amp;#160; Unfortunately, this plug-in is written in Java and I didn’t want to assume the presence of a Java runtime on the build server. Besides, I want to integrate this job as build task (MSBuild build for now but maybe also for NAnt, etc..). For all other purposes a command line interface is essential. All those requirements make the amount of code I could reuse very minimal. So I went for the own solution and started summarizing the requirements.&lt;/p&gt;  &lt;h3&gt;Wish List&lt;/h3&gt;  &lt;p align=&quot;left&quot;&gt;If you prefer the scrum terminology, you can call this wish list the product backlog. It contains all items that COULD be implemented.&lt;/p&gt;  &lt;p align=&quot;left&quot;&gt;Important feature for me are:&lt;/p&gt;  &lt;ul&gt;   &lt;li&gt;     &lt;div align=&quot;left&quot;&gt;Recognizing all lines including // TODO token&lt;/div&gt;   &lt;/li&gt;    &lt;li&gt;     &lt;div align=&quot;left&quot;&gt;Flexibility of defining pre configured and custom tasks&lt;/div&gt;   &lt;/li&gt;    &lt;li&gt;     &lt;div align=&quot;left&quot;&gt;Assigning priorities for the the different types of tasks&lt;/div&gt;   &lt;/li&gt;    &lt;li&gt;     &lt;div align=&quot;left&quot;&gt;Returning for each task a TaskItem object with the description, file and line number.&lt;/div&gt;   &lt;/li&gt;    &lt;li&gt;     &lt;div align=&quot;left&quot;&gt;Grouping the tasks by file name or&amp;#160; priority.&lt;/div&gt;   &lt;/li&gt;    &lt;li&gt;     &lt;div align=&quot;left&quot;&gt;Integration with TeamCity&lt;/div&gt;   &lt;/li&gt;    &lt;li&gt;     &lt;div align=&quot;left&quot;&gt;Generating reports in both xml and html formats&lt;/div&gt;   &lt;/li&gt;    &lt;li&gt;     &lt;div align=&quot;left&quot;&gt;being able to define thresholds for the occurrence of the different type/priorities&amp;#160; to consider a build failed&lt;/div&gt;   &lt;/li&gt; &lt;/ul&gt;  &lt;h3&gt;&amp;#160;&lt;/h3&gt;  &lt;p&gt;To generate a task list to you MSBuild script all you need the the following xml snippet:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:86c57aba-7adc-4695-ab8d-ca426bfa8fc4&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;pre class=&quot;xml&quot; name=&quot;code&quot;&gt;&amp;lt;UsingTask AssemblyFile=&amp;quot;$(ToolPath)\TasklistGenerator\TasklistGenerator.dll&amp;quot; TaskName=&amp;quot;Tasklist&amp;quot; /&amp;gt;
+
+&amp;lt;Target Name=&amp;quot;tasklist&amp;quot; &amp;gt;
+	&amp;lt;Message Text=&amp;quot;==== Generate tas klist ===&amp;quot; /&amp;gt;
+	&amp;lt;CreateItem Include=&amp;quot;src\**\*.cs&amp;quot;&amp;gt;
+      &amp;lt;Output TaskParameter=&amp;quot;Include&amp;quot; ItemName=&amp;quot;Sourcefiles&amp;quot; /&amp;gt;
+    &amp;lt;/CreateItem&amp;gt;
+    &amp;lt;Tasklist Files=&amp;quot;@(Sourcefiles)&amp;quot; OutputFile=&amp;quot;doc\tasks.html&amp;quot; /&amp;gt; 
+&amp;lt;/Target&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;h3&gt;&amp;#160;&lt;/h3&gt;
+
+&lt;h3&gt;The Code&lt;/h3&gt;
+
+&lt;p&gt;Currently, still the project in the pre alpha phase of the CTP (PACTP as I call it since two minutes ago). It Uses a Regex to scan all specified cs files and generates a simple xml representation. A html reporting facility is also in pre stone age look and feel&amp;#160; html (Did I mention I don’t do UI?)&amp;#160; I will try to find out how does usually build tasks, like NUnit, integrate with build server. not sure if there is a common format. The only interface available currently is the MSBuild task.&lt;/p&gt;
+
+&lt;p&gt;You can download the most recent source code from GitHub&amp;#160; at the following link &lt;a title=&quot;http://github.com/mouk/Stutali/tree/master&quot; href=&quot;http://github.com/mouk/Stutali/tree/master&quot;&gt;http://github.com/mouk/Stutali/tree/master&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Because I have never developed an integration task, I don’t know what are the requirements exactly such a thing. More than ever, every idea or notes will be highly appreciated.&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Using IronPython to configure Castle Windsor III</title>
+   <link href="http://mouk.github.io/2009/09/05/using-ironpython-to-configure-castle-windsor-iii/"/>
+   <updated>2009-09-05T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2009/09/05/using-ironpython-to-configure-castle-windsor-iii</id>
+   <content type="html">&lt;div style=&quot;background-color: #e5e5e5; margin: 10px 40px&quot;&gt; &lt;p style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot; align=&quot;center&quot;&gt;&lt;font color=&quot;#004080&quot;&gt;&lt;strong&gt;Pysor Series&lt;/strong&gt;&lt;/font&gt;&lt;/p&gt; &lt;ul&gt; &lt;li&gt; &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/08/using-ironpython-to-configure-castle-windsor/&quot;&gt;Using IronPython to configure Castle Windsor I&lt;/a&gt; : the basic functionality&lt;/div&gt; &lt;/li&gt; &lt;li&gt; &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/08/using-ironpython-to-configure-castle-windsor-ii/&quot;&gt;Using IronPython to configure Castle Windsor II&lt;/a&gt; : parameters and references&lt;/div&gt; &lt;/li&gt; &lt;li&gt; &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/09/using-ironpython-to-configure-castle-windsor-iii/&quot;&gt;Using IronPython to configure Castle Windsor III&lt;/a&gt; : arrays and lists&lt;/div&gt; &lt;/li&gt; &lt;/ul&gt;&lt;/div&gt;   &lt;p&gt;In the first two articles I introduced Pysor, the Castle Windsor configuration tool using IronPython. Now I have added some exciting functions to exploit the nice hash table and list syntax feature in IronPython.&lt;/p&gt; &lt;p&gt;Since the second part of this series is possible to add (named) parameters to component registration. It accepted only both literal and referential scalars. In the current revision you can exploit the nice list syntax of Python using the square brackets to add arrays and list parameters.&lt;/p&gt; &lt;p&gt;A parameter is a string literal or a reference to an already registered service. This value is supplied either to a constructor parameter with the same name or a property.&lt;/p&gt; &lt;p&gt;A example used in the last part was to provide AdditionalMessage property like this:&lt;/p&gt; &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:61188c36-e49e-4b97-b748-09082e5f9f68&quot; class=&quot;wlWriterSmartContent&quot;&gt; &lt;pre name=&quot;code&quot; class=&quot;py&quot;&gt;add( &quot;retriverWithParam&quot;, HtmlTitleRetriever, HtmlTitleRetriever, 
+	{'AdditionalMessage': &quot;Test&quot;})&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Now suppose that we have a class that accepts an array of strings in the constructor.&amp;#160; We could provide them using the Python list syntax&lt;/p&gt;
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:6ce22de8-54ab-4eb9-834e-317534e9a2f8&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+&lt;pre name=&quot;code&quot; class=&quot;py&quot;&gt;add( &quot;MessageStorage&quot; , MessageStorage, MessageStorage, 
+	{'messages':['first message', 'second message' ]})&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;This syntax works not only for array but also for ILists.&lt;/p&gt;
+&lt;p&gt;Things get more interesting when you want to add an array of registered services. The method add returns a hook to the service. You can use this hook to reference the service in the parameters :&lt;/p&gt;
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:ed959925-8214-46fb-a789-b9e3396b9842&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+&lt;pre name=&quot;code&quot; class=&quot;py&quot;&gt;ftp = add( &quot;ftp&quot;, FtpFileDownloader, FtpFileDownloader)
+
+add( &quot;MultipleDowloaderStorage&quot;, MultipleDowloaderStorage,
+	MultipleDowloaderStorage, {'dowloaders' : [ ftp] })&lt;/pre&gt;
+&lt;/div&gt;
+&lt;h3&gt;&amp;#160;&lt;/h3&gt;
+&lt;h3&gt;Comparison&lt;/h3&gt;
+&lt;p&gt;In this section I will compare the same configuration using traditional xml syntax and the Pysor syntax. I am sure not every body would prefer Pysor. I am pretty comfortable with xml, yet I don’t like it. I will choose Pysor anyway. In the next section I will make a small project and use both configuration mechanisms and let you find by yourself, which solution is more elegant and appropriate for you.&lt;/p&gt;
+&lt;p&gt;Not breaking the tradition of almost all IoC tutorials, we will need a logging service to be located dynamically. Additionally we have two implementations: ConsoleLog&amp;#160; and FileLog. FileLog expect a file name in its constructor..&lt;/p&gt;
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:edee535f-32ec-4a79-8803-7835c8a31653&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+&lt;pre name=&quot;code&quot; class=&quot;c#&quot;&gt;public interface ILog
+{
+    void Log(string message);
+}
+
+public class FileLog : ILog
+{
+    private readonly string _fileName;
+    public FileLog(string fileName)
+    {
+        _fileName = fileName;
+    }
+
+    public void Log(string message)
+    {
+        Console.WriteLine(_fileName+ &quot; -&amp;gt; &quot; + message);
+    }
+}
+
+public class ConsoleLog : ILog
+{
+    public void Log(string message)
+    {
+        Console.WriteLine(message);
+    }
+}&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;In additional we have an &lt;em&gt;IAlgorithm&lt;/em&gt; interface with following members:&lt;/p&gt;
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:ba032607-ac95-4193-ab6f-ef6d7f70b391&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+&lt;pre name=&quot;code&quot; class=&quot;c#&quot;&gt;public interface IAlgorithm
+{
+    event EventHandler OnOperationDone;
+    void Run();
+}&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;&lt;em&gt;Algorithm&lt;/em&gt; is a class implementing this interface. &lt;em&gt;AlglorithmRunnner&lt;/em&gt; is a class that takes an algorithm with an array of loggers, starts the algorithm and notify all loggers when an event is fired.&lt;/p&gt;
+&lt;p&gt;Configuring this setup of dependencies in App.config would look much like:&lt;/p&gt;
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:e178480d-0ce9-42e4-9535-1794371d27d1&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+&lt;pre name=&quot;code&quot; class=&quot;xml&quot;&gt;&amp;lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot; ?&amp;gt;
+&amp;lt;configuration&amp;gt;
+  &amp;lt;configSections&amp;gt;
+    &amp;lt;section name=&quot;castle&quot; type=
+&quot;Castle.Windsor.Configuration.AppDomain.CastleSectionHandler, Castle.Windsor&quot;/&amp;gt;
+  &amp;lt;/configSections&amp;gt;
+
+  &amp;lt;castle&amp;gt;
+    &amp;lt;components&amp;gt;
+      &amp;lt;component id=&quot;fileLog&quot;
+                 type=&quot;CastleComparison.FileLog, CastleComparison&quot;
+                 service=&quot;CastleComparison.ILog, CastleComparison&quot;&amp;gt;
+        &amp;lt;parameters&amp;gt;
+          &amp;lt;fileName&amp;gt;log.txt&amp;lt;/fileName&amp;gt;
+        &amp;lt;/parameters&amp;gt;
+      &amp;lt;/component&amp;gt;
+
+      &amp;lt;component id=&quot;consoleLog&quot;
+                 type=&quot;CastleComparison.ConsoleLog, CastleComparison&quot;
+                 service=&quot;CastleComparison.ILog, CastleComparison&quot;&amp;gt;
+      &amp;lt;/component&amp;gt;
+
+      &amp;lt;component id=&quot;algorithm&quot;
+                 type=&quot;CastleComparison.Algorithm, CastleComparison&quot;
+                 service=&quot;CastleComparison.IAlgorithm, CastleComparison&quot;&amp;gt;
+      &amp;lt;/component&amp;gt;
+
+      &amp;lt;component id=&quot;runner&quot;
+                 type=&quot;CastleComparison.AlgorithmRunner, CastleComparison&quot;&amp;gt;
+        &amp;lt;parameters&amp;gt;
+          &amp;lt;loggers&amp;gt;
+            &amp;lt;array&amp;gt;
+              &amp;lt;item&amp;gt;${consoleLog}&amp;lt;/item&amp;gt;
+              &amp;lt;item&amp;gt;${fileLog}&amp;lt;/item&amp;gt;
+            &amp;lt;/array&amp;gt;
+          &amp;lt;/loggers&amp;gt;
+        &amp;lt;/parameters&amp;gt;
+      &amp;lt;/component&amp;gt;
+
+    &amp;lt;/components&amp;gt;
+  &amp;lt;/castle&amp;gt;
+&amp;lt;/configuration&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;On the other hand, configuring it with Pysor is as simple as&lt;/p&gt;
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:47566c04-b019-483c-9930-789f78946a4a&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+&lt;pre name=&quot;code&quot; class=&quot;py&quot;&gt;clr.AddReference(&quot;CastleComparison&quot;)
+from CastleComparison import *
+
+fileLog = add(&quot;fileLog&quot;, ILog, FileLog, 
+	{&quot;fileName&quot;:&quot;log.txt&quot;})
+consoleLog = add(&quot;consoleLog&quot;, ILog, ConsoleLog)
+
+add(&quot;algorithm &quot;, IAlgorithm , Algorithm )
+
+add(&quot;runner&quot;, AlgorithmRunner, AlgorithmRunner, 
+	{&quot;loggers&quot;: [consoleLog, fileLog]})&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Clearly, I will always choose the second configuration.&lt;/p&gt;
+&lt;h3&gt;To-do's&lt;/h3&gt;
+&lt;p&gt;The updated to-do list is now&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;span style=&quot;text-decoration: line-through&quot;&gt;Adding a nicer API for referencing assemblies and importing namespaces&lt;/span&gt; (I have now idea how to do it). &lt;/li&gt;
+&lt;li&gt;&lt;span style=&quot;text-decoration: line-through&quot;&gt;Adding parameters to be passed to the constructor.&lt;/span&gt; &lt;/li&gt;
+&lt;li&gt;&lt;span style=&quot;text-decoration: line-through&quot;&gt;Passing parameters as lists or arrays.&lt;/span&gt; &lt;/li&gt;
+&lt;li&gt;Dictionary based parameters &lt;/li&gt;
+&lt;li&gt;&lt;span style=&quot;text-decoration: line-through&quot;&gt;Referencing already registered implementation inside the same configuration script.&lt;/span&gt; &lt;/li&gt;
+&lt;li&gt;Documenting and signing the assembly &lt;/li&gt;
+&lt;li&gt;Lifestyle management &lt;/li&gt;
+&lt;li&gt;Considering turning Pysor into an Interpreter to be used as the built-in XmlInterpreter &lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Source Code&lt;/h3&gt;
+&lt;p&gt;Please don’t forget to download the code from &lt;a href=&quot; https://github.com/mouk/Pysor/ &quot;&gt;GitHub&lt;/a&gt; and try it yourself.&lt;/p&gt;
+&lt;p&gt;All remarks , ideas, bug reports, etc. will be appreciated.&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>xUnit.net and running multiple test assemblies</title>
+   <link href="http://mouk.github.io/2009/09/03/xunit-net-and-running-multiple-test-assemblies/"/>
+   <updated>2009-09-03T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2009/09/03/xunit-net-and-running-multiple-test-assemblies</id>
+   <content type="html">&lt;p&gt;&lt;a href=&quot;http://www.codeplex.com/xunit&quot;&gt;xUnit.net&lt;/a&gt; is a unit testing framework for the .Net platform designed with inspired by some nice ideas like reducing custom attributes, one instance per method , etc. The Internet is full of blog posts and articles about xUnit. In this &lt;a href=&quot;http://xunit.codeplex.com/Wiki/View.aspx?title=Comparisons&amp;amp;referringTitle=Home&quot;&gt;link&lt;/a&gt; you can find a comparison of xUnit and other popular unit testing frameworks.&lt;/p&gt;  &lt;p&gt;For the CI I use MSBuild script that compiles, runs test, generates documentations, etc.&amp;#160; For test projects I have the habit of postfixing them with &amp;quot;Tests”&amp;#160; to simplify fetching all test dlls in MSBuild scripts using wild cards (Who dares to claim that Convention over Configuration is new in the .Net world? ). Running all NUnit tests in some project would look like :&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:fd8405d6-bdad-4cf5-a85c-c20227d95a22&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;pre class=&quot;xml&quot; name=&quot;code&quot;&gt;&amp;lt;CreateItem Include=&amp;quot;tests\*\bin\Debug\*.Tests.dll&amp;quot;&amp;gt;
+  &amp;lt;Output TaskParameter=&amp;quot;Include&amp;quot; ItemName=&amp;quot;TestAssembly&amp;quot; /&amp;gt;
+&amp;lt;/CreateItem&amp;gt;
+&amp;lt;NUnit Assemblies=&amp;quot;@(TestAssembly)&amp;quot; ToolPath=&amp;quot;$(NUnit-ToolPath)&amp;quot; /&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;Adding new test project will require me to add nothing to the build script. I have just to follow the convention.&lt;/p&gt;
+
+&lt;p&gt;Unfortunately this is not possible with xUnit task because it accepts only one assembly. Thus I have to specify each assembly separately. The xml result will be also split. &lt;a href=&quot;http://twitter.com/bradwilson&quot;&gt;@bradwilson&lt;/a&gt; nicely wrote me via&amp;#160; Twitter, that I can use a project file to specify multiple assembly.&amp;#160; This, while solving the second problem, doesn’t enable you to use wild cards. You have to add each assembly manually to the project.&lt;/p&gt;
+
+&lt;p&gt;Gallio is a tool&amp;#160; or, may better a framework, for running many test frameworks in the same way and provides as unique results format. It integrates also very well with some build servers.&lt;/p&gt;
+
+&lt;p&gt;To integrate Gallio in my MSBuild script I downloaded the bits from &lt;a href=&quot;http://www.gallio.org/&quot;&gt;here&lt;/a&gt; and extracted them to the tools folder inside my project root folder.&lt;/p&gt;
+
+&lt;p&gt;Running the tests was as simple as&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:5707c53a-fbff-429b-86a7-a4ec182f9f52&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;xml&quot; name=&quot;code&quot;&gt;&amp;lt;UsingTask AssemblyFile=&amp;quot;$(ToolPath)\gallio\Gallio.MSBuildTasks.dll&amp;quot;
+	TaskName=&amp;quot;Gallio&amp;quot; /&amp;gt;
+
+&amp;lt;Target Name=&amp;quot;Test&amp;quot; DependsOnTargets=&amp;quot;Build&amp;quot;&amp;gt;
+	&amp;lt;Message Text=&amp;quot;==== Starting Gallio to run tests ===&amp;quot; /&amp;gt;
+	
+	&amp;lt;CreateItem Include=&amp;quot;tests\*\bin\Debug\*Tests.dll&amp;quot;&amp;gt;
+      &amp;lt;Output TaskParameter=&amp;quot;Include&amp;quot; ItemName=&amp;quot;TestAssemblies&amp;quot; /&amp;gt;
+    &amp;lt;/CreateItem&amp;gt;
+    &amp;lt;Gallio RunnerExtensions=&amp;quot;TeamCityExtension,Gallio.TeamCityIntegration&amp;quot;
+        Assemblies=&amp;quot;@(TestAssemblies)&amp;quot;  /&amp;gt; 
+&amp;lt;/Target&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;&lt;em&gt;RunnerExtensions&lt;/em&gt; is an extension for Gallio to provide TeamCity with status messages. Integrating Gallio with TeamCity will be discussed in a following post.&lt;/p&gt;
+
+&lt;p&gt;&amp;#160;&lt;/p&gt;
+
+&lt;h3&gt;NUnit&amp;#160;&amp;#160; and running multiple assemblies from the console&lt;/h3&gt;
+
+&lt;p&gt;Even though NUnit MSBuild task supports multiple assemblies, if you want to use NCover with NUnit&amp;#160; you have to do some manual work to enable NCover running NUnit console tool. The @() operator of MSBuild join all paths with a semicolon. On the other hand NUnit console runner expect all assemblies to be separated with a white space. Fortunately you can tell @() how it should concatenate the paths.&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:cfcb8e85-8674-4b37-9ae8-0ae4a90f0d97&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;xml&quot; name=&quot;code&quot;&gt;&amp;lt;NCover ToolPath=&amp;quot;$(NCoverPath)&amp;quot;
+        CommandLineExe=&amp;quot;$(NUnit-ToolPath)\nunit-console.exe&amp;quot;
+        WorkingDirectory=&amp;quot;.&amp;quot;
+        CommandLineArgs=&amp;quot;@(TestDll-&amp;gt;'%(Identity)', ' ')&amp;quot;
+        CoverageFile=&amp;quot;$(CoverageFile)&amp;quot;
+        LogFile=&amp;quot;$(CoveragePath)\Coverage.log&amp;quot;
+        AssemblyList=&amp;quot;@(CoverageDll)&amp;quot; /&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;In the fourth line @ concatenate the relative path of each file using a white space. You may need to surround each path with a quote if it contains white spaces.&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Using IronPython to configure Castle Windsor II</title>
+   <link href="http://mouk.github.io/2009/08/23/using-ironpython-to-configure-castle-windsor-ii/"/>
+   <updated>2009-08-23T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2009/08/23/using-ironpython-to-configure-castle-windsor-ii</id>
+   <content type="html">&lt;div style=&quot;background-color: #e5e5e5; margin: 10px 40px&quot;&gt; &lt;p style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot; align=&quot;center&quot;&gt;&lt;font color=&quot;#004080&quot;&gt;&lt;strong&gt;Pysor Series&lt;/strong&gt;&lt;/font&gt;&lt;/p&gt; &lt;ul&gt; &lt;li&gt; &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/08/using-ironpython-to-configure-castle-windsor/&quot;&gt;Using IronPython to configure Castle Windsor I&lt;/a&gt; : the basic functionality&lt;/div&gt; &lt;/li&gt; &lt;li&gt; &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/08/using-ironpython-to-configure-castle-windsor-ii/&quot;&gt;Using IronPython to configure Castle Windsor II&lt;/a&gt; : parameters and references&lt;/div&gt; &lt;/li&gt; &lt;li&gt; &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/09/using-ironpython-to-configure-castle-windsor-iii/&quot;&gt;Using IronPython to configure Castle Windsor III&lt;/a&gt; : arrays and lists&lt;/div&gt; &lt;/li&gt; &lt;/ul&gt;&lt;/div&gt;   &lt;p&gt;In the last article I introduced a small Castle Windsor configuration tool using IronPython. This tool enabled us to add service implementation in an easer to read way. On the other hand advanced usages like optional and constructer parameters were not possible.&lt;/p&gt;  &lt;p&gt;In this article I will continue developing Pysor (As I called it!) to accept parameters. Before introducing the new functionality I will&amp;#160; show what are parameters and when and how would you want to use them. For the sake of demonstration I will borrow the demo application from the very good &lt;a href=&quot;http://dotnetslackers.com/articles/designpatterns/InversionOfControlAndDependencyInjectionWithCastleWindsorContainerPart1.aspx&quot;&gt;article&lt;/a&gt; series from Simone Busoli about Castle Windsor. If you didn’t read it then go read it all and come back.&lt;/p&gt;  &lt;p&gt;The developed application is an html title retriever. It downloads an html string and then extract the title tag from it.&amp;#160; For downloading the the html document it uses an &lt;em&gt;I Downloader&lt;/em&gt; service&amp;#160; that accepts an Uri object and downloads it if it can handle the scheme. For Example we have an &lt;em&gt;HtmlDownloader&lt;/em&gt;, &lt;em&gt;FileDownloader&lt;/em&gt;, etc. The other needed service is &lt;em&gt;ITitleScraper&lt;/em&gt; which extract the &lt;em&gt;&amp;lt;title&amp;gt;&lt;/em&gt; tag contents.&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:f754ed02-33f7-417a-9f65-faf81edf2a0b&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;public interface IFileDownloader
+{
+    string Download(Uri file);
+    bool SupportsUriScheme(Uri file);
+}
+
+public interface ITitleScraper
+{
+    string Scrape(string fileContents);
+}&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;For the purpose of accelerating the unit tests I changed the downloader to not really download the files but return a fake text instead.&lt;/p&gt;
+
+&lt;p&gt;Having the constructor :&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:5e84efd9-b0ca-4634-abcd-26071075727e&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;public HtmlTitleRetriever(IFileDownloader downloader, ITitleScraper scraper)
+{
+    AdditionalMessage = &amp;quot;&amp;quot;;
+    Downloader = downloader;
+    Scraper = scraper;
+}&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;with AdditionalMessage as a property indicates a short message, that will be concatenated with retrieved tile, we can now configure the container:&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:0f5b62a6-3a79-475d-a2b6-96be6b23a659&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;py&quot; name=&quot;code&quot;&gt;add( &amp;quot;parsingScraper&amp;quot; , ITitleScraper, StringParsingTitleScraper)
+	
+add( &amp;quot;HttpFileDownloader&amp;quot;, IFileDownloader, HttpFileDownloader)
+
+add( &amp;quot;retriver&amp;quot;, HtmlTitleRetriever, HtmlTitleRetriever)&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;And everything works like expected. Now suppose we want to set the &lt;em&gt;AdditionalMessage&lt;/em&gt; for each initiated object. Using xml configuration this could be achieved using a parameters tag&amp;#160; containing all parameters in a dictionary-like fashion.&lt;/p&gt;
+
+&lt;p&gt;The most appropriate data structure for this purpose in Python would be a hash which is equivalent to a &lt;em&gt;Dictionary&lt;/em&gt; in the .Net&amp;#160; world.&lt;/p&gt;
+
+&lt;p&gt;Because C# in the current version doesn’t support optional or named parameters and because I don’t&amp;#160; know whether Python supports method overloading I added a Python method with supply the C# method with default value for missing arguments.&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:a51ce9fe-6eef-495b-9b6f-eb51f6131871&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;py&quot; name=&quot;code&quot;&gt;def add(name, service, impl, params={}):
+	addComponent(name, service, impl, params)&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;Using this new method you can now set the &lt;em&gt;AdditionalMessage&lt;/em&gt; value for each object:&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:d3598f7b-8b81-42b0-9743-8a1b488e1c62&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;py&quot; name=&quot;code&quot;&gt;add( &amp;quot;retriverWithParam&amp;quot;, HtmlTitleRetriever, HtmlTitleRetriever, 
+	{'AdditionalMessage': &amp;quot;Test&amp;quot;})&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;We test it with&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:d4bb3b25-65d1-4873-9339-7d71140eea40&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;[Test]
+public void CanProvideOptionalParameters()
+{
+    var obj = container.Resolve&amp;lt;HtmlTitleRetriever&amp;gt;(&amp;quot;retriverWithParam&amp;quot;);
+    Assert.AreNotEqual(&amp;quot;&amp;quot;, obj.AdditionalMessage);
+}&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;And of course it works.&lt;/p&gt;
+
+&lt;p&gt;Notice that in line 4 we specified the name of the configuration node to use because have added the service HtmlTitleRetriever twice.&lt;/p&gt;
+
+&lt;p&gt;The other use of parameters is to specify an implementation for some service to be used.&amp;#160; If you have for example another &lt;em&gt;IDownloader&lt;/em&gt; implementation, that retrieves files sing the ftp protocol and we want to use this implementation for the constructor.&amp;#160; In xml we could do it using &lt;em&gt;${name}&lt;/em&gt; to reference the name of an already registered service. In Pysor we can use this notation as well. But to make it more like a usual program I modified the &lt;em&gt;add&lt;/em&gt; function to return a string to be used whenever you need to reference this implementation.&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:ea561955-ec18-4dcf-a257-c094fd4bd558&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;Func&amp;lt;string, Type, Type, IDictionary&amp;lt;object, object&amp;gt; , string&amp;gt; action =
+     (name, service, impl, parameters) =&amp;gt;
+         {
+             var pairs = parameters.ToList();
+             var reg = Component
+                 .For(service)
+                 .ImplementedBy(impl)
+                 .Named(name);
+
+             if (pairs.Count &amp;gt; 0)
+             {
+                 var param = (from pair in pairs
+                              select Parameter
+                                 .ForKey(pair.Key.ToString())
+                                 .Eq(pair.Value.ToString())
+                             ).ToArray();
+                 reg = reg.Parameters(param);
+             }
+
+             container.Register(reg);
+             return &amp;quot;${&amp;quot; + name + &amp;quot;}&amp;quot;;
+         };
+
+ //Inject this function into IronPython runtime
+scope.SetVariable(&amp;quot;addComponent&amp;quot;, action);&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;And the Python wrapper function looks now like:&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:2c18f072-fac9-4253-9887-cc45b50742d9&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;py&quot; name=&quot;code&quot;&gt;def add(name, service, impl, params={}):
+	return addComponent(name, service, impl, params)&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;We are now ready to register a retriever that uses a concrete implementation:&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:cf9a2113-c617-4c5a-9346-b9e6daf40952&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;py&quot; name=&quot;code&quot;&gt;ftp = add( &amp;quot;ftp&amp;quot;, FtpFileDownloader, FtpFileDownloader)
+
+add( &amp;quot;ftpRetriver&amp;quot;, HtmlTitleRetriever, HtmlTitleRetriever, 
+	{'downloader': ftp})&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:53645658-3210-42d6-95fd-87aca0d47629&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;[Test]
+public void CanProvideSpecificImplimentationParameters()
+{
+    var obj = container.Resolve&amp;lt;HtmlTitleRetriever&amp;gt;(&amp;quot;ftpRetriver&amp;quot;);
+    Assert.IsInstanceOf&amp;lt;FtpFileDownloader&amp;gt;(obj.Downloader);
+}&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;We are finished for now.&lt;/p&gt;
+
+&lt;h3&gt;&amp;#160;&lt;/h3&gt;
+
+&lt;h3&gt;To-do's&lt;/h3&gt;
+
+&lt;p&gt;The updated to-do list is now&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Adding a nicer API for referencing assemblies and importing namespaces. &lt;/li&gt;
+
+  &lt;li&gt;&lt;span style=&quot;text-decoration: line-through&quot;&gt;Adding parameters to be passed to the constructor.&lt;/span&gt; &lt;/li&gt;
+
+  &lt;li&gt;&lt;span style=&quot;text-decoration: line-through&quot;&gt;Referencing already registered implementation inside the same configuration script.&lt;/span&gt; &lt;/li&gt;
+
+  &lt;li&gt;Lifestyle management &lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3&gt;Source Code&lt;/h3&gt;
+
+&lt;p&gt;The source code of Pysor is available to download from GitHub&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/mouk/Pysor/&quot;&gt;https://github.com/mouk/Pysor/&lt;/a&gt;&lt;/p&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Using IronPython to configure Castle Windsor I</title>
+   <link href="http://mouk.github.io/2009/08/17/using-ironpython-to-configure-castle-windsor/"/>
+   <updated>2009-08-17T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2009/08/17/using-ironpython-to-configure-castle-windsor</id>
+   <content type="html">&lt;p&gt;&lt;/p&gt;  &lt;div style=&quot;background-color: #e5e5e5; margin: 10px 40px&quot;&gt;   &lt;p style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot; align=&quot;center&quot;&gt;&lt;font color=&quot;#004080&quot;&gt;&lt;strong&gt;Pysor Series&lt;/strong&gt;&lt;/font&gt;&lt;/p&gt;    &lt;ul&gt;     &lt;li&gt;       &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/08/using-ironpython-to-configure-castle-windsor/&quot;&gt;Using IronPython to configure Castle Windsor I&lt;/a&gt; : the basic functionality&lt;/div&gt;     &lt;/li&gt;      &lt;li&gt;       &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/08/using-ironpython-to-configure-castle-windsor-ii/&quot;&gt;Using IronPython to configure Castle Windsor II&lt;/a&gt; : parameters and references&lt;/div&gt;     &lt;/li&gt;      &lt;li&gt;       &lt;div style=&quot;border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid&quot;&gt;&lt;a href=&quot;http://abstractast.com/2009/09/using-ironpython-to-configure-castle-windsor-iii/&quot;&gt;Using IronPython to configure Castle Windsor III&lt;/a&gt; : arrays and lists&lt;/div&gt;     &lt;/li&gt;   &lt;/ul&gt; &lt;/div&gt;  &lt;p&gt;Castle Windsor is a very popular IoC container in the .Net world. Like almost all other containers it can be configured using either a fluent interface or an xml-based configuration file.&lt;/p&gt;  &lt;p&gt;The fluent interface has the advantage of being strongly typed, what spares you a lot of errors caused by typos. On the other hand, it is hard coded and can’t be changed easily without recompiling (Actually you could use an IoC container to load you IoC container configuration dynamically but it give a rise to the question: “How do configure the container to load its own configuration?” ;-) )&lt;/p&gt;  &lt;p&gt;The other option is to use an xml file. Despite being the most used solution in almost all containers it is really a very ugly solution. The configuration file can get very big and very complicated.&lt;/p&gt;  &lt;p&gt;As I am reading &lt;a href=&quot;http://www.manning.com/foord/&quot;&gt;IronPython&lt;/a&gt; in Action from Manning Publications, I thought I could configure Windsor using Python and a very tiny DSL. IronPython is an interpreted language for .Net framework. It combines the elegance of Python with the strength of .Net. Since it being interpreted it is a suitable solution for configuration.&lt;/p&gt;  &lt;p&gt;For the beginning I will start with a simple solution, that can configure basic service without an enough for me to be able to configure just basic services without parameter zing. The syntax for configuring a simple implementation in Castle looks like:&lt;/p&gt;  &lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:bf6ad6ce-079b-4a50-8af3-cca3a4651ffa&quot; class=&quot;wlWriterSmartContent&quot;&gt;   &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;container.AddComponent(&amp;quot;service.name&amp;quot;
+				typeof(IService&amp;gt;),
+				typeof(Implementation));&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;Of course there is a whole bunch of other&amp;#160; settings like lifestyle and parameters, but I will ignore that for now.&lt;/p&gt;
+
+&lt;p&gt;Analyzing this one line I realized that all I need is a function with three arguments: the name of the coupling, the service type and the implementation type. SoI coded thus a function in C#:&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:1c24cf43-d9da-407e-8c96-debf6b628784&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;private static void ConfigureContainer(IWindsorContainer container, string scriptPath)
+{
+	var engine = Python.CreateEngine();
+    var runtime = engine.Runtime;
+    var scope = runtime.CreateScope();
+    scope.SetVariable(&amp;quot;__main__&amp;quot;, &amp;quot;__main__&amp;quot;);
+    Action&amp;lt;string, Type, Type&amp;gt; action = 
+			(name, service, impl)=&amp;gt; 
+				container.AddComponent(name, service, impl);
+
+	//Inject this function into IronPython runtime
+    scope.SetVariable(&amp;quot;add&amp;quot;,action); 
+    var script = engine.CreateScriptSourceFromFile(scriptPath);
+    var code = script.Compile();
+    code.Execute(scope);
+}&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;To test this DSL I wrote a simple interface with a single implementation to bind them with Python.&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:b71804f3-a8bc-46a3-900e-fd1c10257c62&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;namespace PythonConfig
+{
+    public interface IDependency
+    {
+        string Name
+        { get; }
+    }
+    public class Dependency : IDependency
+    {
+        public string Name
+        {
+            get { return &amp;quot;Default&amp;quot;; }
+        }
+    }
+}&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;And the Python configuration is just as simple as&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:d702a191-18a6-43c3-aca8-da8ea82ed00a&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;py&quot; name=&quot;code&quot;&gt;import clr
+clr.AddReference(&amp;quot;PythonConfig&amp;quot;)
+from PythonConfig import *
+
+add(&amp;quot;name&amp;quot; , IDependency, Dependency)&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;Now everything is ready. You can configure the container using this file:&lt;/p&gt;
+
+&lt;div style=&quot;padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px&quot; id=&quot;scid:812469c5-0cb0-4c63-8c15-c81123a09de7:cbe9c720-076b-4feb-aaf3-25a83b30b9cb&quot; class=&quot;wlWriterSmartContent&quot;&gt;
+  &lt;pre class=&quot;c#&quot; name=&quot;code&quot;&gt;static void Main(string[] args)
+{
+    var container = new WindsorContainer();
+    ConfigureContainer(container, &amp;quot;script.py&amp;quot;);
+
+    var depend= container.Resolve&amp;lt;IDependency&amp;gt;();
+    Console.WriteLine(depend.Name);
+    Console.ReadLine();
+}&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;And … it works as expected!&lt;/p&gt;
+
+&lt;h3&gt;Todo’s&lt;/h3&gt;
+
+&lt;p&gt;I am very aware that this implementation is very limited and incomplete. It is just enough for my needs (That’s how DSL ought to be). Nevertheless, I will try to add some of the missing features. In particularly following&amp;#160; functionalities will be considered very soon:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Adding a nicer API for referencing assemblies and importing namespaces. &lt;/li&gt;
+
+  &lt;li&gt;Adding parameters to be passed to the constructor. &lt;/li&gt;
+
+  &lt;li&gt;Referencing&amp;#160; already registered implementation inside the same configuration script. &lt;/li&gt;
+
+  &lt;li&gt;Lifestyle management &lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3&gt;Links&lt;/h3&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;a href=&quot;http://ironpython.codeplex.com/&quot;&gt;IronPython&lt;/a&gt;’s page on Codeplex. &lt;/li&gt;
+
+  &lt;li&gt;&lt;a href=&quot;http://www.amazon.com/IronPython-Action-Michael-Foord/dp/1933988339&quot;&gt;IronPython in Action&lt;/a&gt; an excellent (and &lt;span style=&quot;text-decoration: line-through&quot;&gt;currently the only&lt;/span&gt; the first) IronPython book by &lt;a href=&quot;http://www.voidspace.org.uk/&quot;&gt;Michael Foord&lt;/a&gt;. &lt;/li&gt;
+
+  &lt;li&gt;&lt;a href=&quot;http://ayende.com/Blog/archive/2006/09/16/IntroductingBinsorTheBooDSLForWindsor.aspx&quot;&gt;Binsor&lt;/a&gt;: a &lt;a href=&quot;http://boo.codehaus.org/&quot;&gt;Boo&lt;/a&gt; based DSL for Windsor by &lt;a href=&quot;http://www.Ayende.com/Blog&quot;&gt;Ayende&lt;/a&gt;. &lt;/li&gt;
+&lt;/ul&gt;
+</content>
+ </entry>
+ 
+ <entry>
+   <title>Comparison of some popular pastebins</title>
+   <link href="http://mouk.github.io/2009/08/16/comparison-of-some-popular-pastebins/"/>
+   <updated>2009-08-16T00:00:00+02:00</updated>
+   <id>http://mouk.github.io/2009/08/16/comparison-of-some-popular-pastebins</id>
+   <content type="html">&lt;p&gt;Recently I have seen a lot of links, especially on twitter, to some pieces of code hosted on some online code sites. I really liked the idea and started to use those site. Later on I discovered that they are called &lt;a href=&quot;http://en.wikipedia.org/wiki/Pastebin&quot;&gt;pastebins&lt;/a&gt;&amp;#160; and have been existing for a long time, mainly among the IRC community. &lt;/p&gt;  &lt;p&gt;Because each time I wanted to use this service, I wondered which one to use, I decided to do some comparison and&amp;#160; outline the differences.&amp;#160; Thus picked the ones I have most seen or used and compared them with each other. My chosen pastebins are:&lt;/p&gt;  &lt;ul&gt;   &lt;li&gt;&lt;a href=&quot;http://paste-it.net&quot;&gt;paste-it.net&lt;/a&gt; &lt;/li&gt;    &lt;li&gt;&lt;a href=&quot;http://pastie.org/&quot;&gt;pastie.org&lt;/a&gt; &lt;/li&gt;    &lt;li&gt;&lt;a href=&quot;http://codepaste.net&quot;&gt;codepaste.net&lt;/a&gt; &lt;/li&gt;    &lt;li&gt;&lt;a href=&quot;http://gist.github.com&quot;&gt;gist.github.com&lt;/a&gt; &lt;/li&gt; &lt;/ul&gt;  &lt;h2&gt;&amp;#160;&lt;/h2&gt;  &lt;h2&gt;Paste-it.net&lt;/h2&gt;  &lt;p&gt;&lt;a href=&quot;http://paste-it.net&quot;&gt;Paste-it.net&lt;/a&gt; supports a very large number of languages.&amp;#160; Almost all popular languages can be chosen from the list. Just as an example : C#, VB.NET Ruby, Java, Django, xml, etc.&amp;#160; There are even some languages I have ever heard of. I Didn’t know for example that vim is a language. &lt;/p&gt;  &lt;p&gt;Beside the big number of supported languages I like ability to set an expiration date at most. If you need to send some co-workers a small piece of code of some internal project and don’t want it to be persisted this option helps you minimizing this risk.&amp;#160; Paste some code and make it disappear after one day. &lt;/p&gt;  &lt;p&gt;&lt;a href=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/pasteit.jpg&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: block; float: none; border-top-width: 0px; border-bottom-width: 0px; margin-left: auto; border-left-width: 0px; margin-right: auto&quot; title=&quot;paste-it&quot; border=&quot;0&quot; alt=&quot;paste-it&quot; src=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/pasteit_thumb.jpg&quot; width=&quot;554&quot; height=&quot;303&quot; /&gt;&lt;/a&gt; &lt;/p&gt;  &lt;p&gt;The other interesting option is the hidden check box,&amp;#160; with which you could hide your paste. I am not really sure how this works. You still can access this post without a password. I guess, it just will prevent you past from being listed.&lt;/p&gt;  &lt;p&gt;When viewing a piece of code on paste-it.net you can change the language any time you wish. Beside this ability, you can’t change the theme.&amp;#160; You have always the basic theme with a light background. For my this is almost always just fine. You could also view the raw code, download it as a text file of tweet it.&lt;/p&gt;  &lt;p&gt;Right to the code you get a whole bunch of Google ads. All ads are in text format with no blinking or moving party, yet a really whole bunch of them.&lt;/p&gt;  &lt;h2&gt;&amp;#160;&lt;/h2&gt;  &lt;h2&gt;Pastie.org&lt;/h2&gt;  &lt;p&gt;&lt;a href=&quot;http://pastie.org&quot;&gt;Pastie.org&lt;/a&gt; is another simple and easy to use pastebin.&amp;#160; The first thing took my attention was the absent of C#&amp;#160; support (and actually all other .NET languages too) . I don’t thing adding support for C# will cause the developers any more effort. They could just the use theme of java for now.&amp;#160; On the other hand, you can choose Pascal if you wish. Ruby, RoR, C++, etc. are some of the supported languages.&lt;/p&gt;  &lt;p&gt;&lt;a href=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/pastie.jpg&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: block; float: none; border-top-width: 0px; border-bottom-width: 0px; margin-left: auto; border-left-width: 0px; margin-right: auto&quot; title=&quot;pastie&quot; border=&quot;0&quot; alt=&quot;pastie&quot; src=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/pastie_thumb.jpg&quot; width=&quot;554&quot; height=&quot;301&quot; /&gt;&lt;/a&gt; &lt;/p&gt;  &lt;p&gt;Pastie allows you as well to hide you pastes. On the other hand, it not possible to make the pastes expire after some period of time.&amp;#160; When making a paste private, it gets a very harder name to guess instead of the usual serial number.&lt;/p&gt;  &lt;p&gt;In addition to posting a link to your paste you can also embed it in your html. Pastie gives you a small html snippet to a JavaScript file, that inject the code inside of the Dom. Oddly enough when&amp;#160; you make a paste private you still get the snippet to embed, but it does nothing. It's Pretty confusing the first time you see it. The public ones will work and display the code properly if you have a lot of horizontal space and don’t have complicated style sheets.&amp;#160; For this blog it failed miserably.&lt;/p&gt;  &lt;p&gt;Another nice feature is the ability to change the theme on the fly. Not very crucial for me, but it still yet nice feature to have.&lt;/p&gt;  &lt;p&gt;&lt;a href=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/pastieembedded.jpg&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: block; float: none; border-top-width: 0px; border-bottom-width: 0px; margin-left: auto; border-left-width: 0px; margin-right: auto&quot; title=&quot;pastie-embedded&quot; border=&quot;0&quot; alt=&quot;pastie-embedded&quot; src=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/pastieembedded_thumb.jpg&quot; width=&quot;554&quot; height=&quot;296&quot; /&gt;&lt;/a&gt; &lt;/p&gt;  &lt;p&gt;For making a bundle of code you Pastie provides you with the ability to define different sections inside your paste and giving each section a title.&amp;#160; One limitation of this feature is that you cannot chose different language for each section. That means you cannot paste the controller code and the mark up of some mvc page.&lt;/p&gt;  &lt;p&gt;One graphical ad is shown decently on the right bar. Nothing else.&lt;/p&gt;  &lt;h2&gt;&amp;#160;&lt;/h2&gt;  &lt;h2&gt;Codepaste.net&lt;/h2&gt;  &lt;p&gt;&lt;a href=&quot;http://Codepaste.net &quot;&gt;Codepaste.net&lt;/a&gt; is a .Net oriented pastebin.&amp;#160; It supports all major .Net languages with some other languages, that may be used during .Net development like JavaScript, Powershell, xml, etc. Support for C++ and Java is also available. &lt;/p&gt;  &lt;p&gt;Because of it lack of hiding and expiration settings it is really easy to go. Just paste a snippet, give it a title, choose the language&amp;#160; and push the button. Some other optional information like author name and tags can be provided. After posting the code I couldn’t see anyway to edit the paste. Anyway you can register and log in to manage your pastes. &lt;/p&gt;  &lt;p&gt;&lt;a href=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/codepastenetscreeenshot.jpg&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: block; float: none; border-top-width: 0px; border-bottom-width: 0px; margin-left: auto; border-left-width: 0px; margin-right: auto&quot; title=&quot;codepaste-net-screeenshot&quot; border=&quot;0&quot; alt=&quot;codepaste-net-screeenshot&quot; src=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/codepastenetscreeenshot_thumb.jpg&quot; width=&quot;554&quot; height=&quot;302&quot; /&gt;&lt;/a&gt; &lt;/p&gt;  &lt;p&gt;Beside “recent posts” codepaste.net provides also feed to pastes. I have no idea why anyone would like to subscribe to some bunch of non-related code snippets. &lt;/p&gt;  &lt;p&gt;A very interesting feature is its API. It provides access to looking up, searching and posting.&amp;#160; This may be very useful for integrating in other application like twitter clients. just like the URLs shorteners. &lt;/p&gt;  &lt;p&gt;Unfortunately codepaste.net doesn’t provide a link to the raw source code, what makes copying some piece of the code a bit harder.&lt;/p&gt;  &lt;h2&gt;&amp;#160;&lt;/h2&gt;  &lt;h2&gt;gist.github.com&lt;/h2&gt;  &lt;p&gt;&lt;a href=&quot;http://gist.github.com&quot;&gt;gist.github.com&lt;/a&gt; is a service from Github, the popular project hosting service. When using gist you get all benefits of Github. Each snippet you post to gist become a Git repository with all the known capabilities like cloning, editing and pushing. Taking the embedding facility into consideration, gist.github.com is a very powerful way to post code into some html page and keeping it up to date.&lt;/p&gt;  &lt;p&gt;&lt;a href=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/gist.github.screenshot.jpg&quot;&gt;&lt;img style=&quot;border-right-width: 0px; display: block; float: none; border-top-width: 0px; border-bottom-width: 0px; margin-left: auto; border-left-width: 0px; margin-right: auto&quot; title=&quot;gist.github.screenshot&quot; border=&quot;0&quot; alt=&quot;gist.github.screenshot&quot; src=&quot;http://abstractast.com/images/ComparisonofOnlineCodePastePlatforms_12FD4/gist.github.screenshot_thumb.jpg&quot; width=&quot;554&quot; height=&quot;303&quot; /&gt;&lt;/a&gt; &lt;/p&gt;  &lt;p&gt;&amp;#160;&lt;/p&gt;  &lt;h2&gt;Links&lt;/h2&gt;  &lt;p&gt;Wikipedia has also an &lt;a href=&quot;http://en.wikipedia.org/wiki/Comparison_of_pastebins&quot;&gt;article&lt;/a&gt; comparing some other pastebins. &lt;/p&gt;
+</content>
+ </entry>
+ 
+ 
+</feed>

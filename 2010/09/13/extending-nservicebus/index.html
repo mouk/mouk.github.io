@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html class="fuelux" lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv='Content-Type' content='text/html; charset=utf-8'>
+    <title>Extending NServiceBus</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Technical Web Development Blog">
+    <meta name="author" content="Garry Welding">
+    <script src="/js/all.js" type="text/javascript"></script>
+	<link href="/css/all.css" rel="stylesheet">	
+	
+    <!-- Le HTML5 shim, for IE6-8 support of HTML5 elements -->
+    <!--[if lt IE 9]>
+      <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+
+    <!-- Le fav and touch icons -->
+    <link rel="shortcut icon" href="/favicon.ico">
+  </head>
+  <body data-spy="scroll" data-target=".subnav" data-offset="50">
+    <div class="navbar navbar-fixed-top">
+    <div class="navbar-inner">
+        <div class="container">
+            <a class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse">
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </a>
+            <a class="brand" href="http://mouk.github.io">Abstract AST</a>
+            <div class="nav-collapse">
+                <ul class="nav">
+                    <li class="">
+                        <a href="http://mouk.github.io"><i class="icon-home"></i> Home</a>
+                    </li>
+                    <li class="dropdown">
+                        <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+                            <i class="icon-list"></i> Projects <b class="caret"></b>
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li class=""><a href="https://github.com/gkwelding/WSDLInterpreter" title="take me to the WSDLInterpreter github page" target="_blank">WSDLInterpreter</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/Scene7WSDLPHPWrapper" title="take me to the Scene7WSDLPHPWrapper github page" target="_blank">Adobe Scene7 WSDL PHP Wrapper</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/GoogleMapsV3CI" title="take me to the Google Maps V3 API for CodeIgniter github page" target="_blank">Google Maps V3 API for CodeIgniter</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/MailchimpAPICI" title="take me to the MailChimp API for CodeIgniter github page" target="_blank">MailChimp API for CodeIgniter</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/FuelPHP-Social-Package" title="take em to the FuelPHP Social Package github page" target="_blank">FuelPHP Social Package</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/Bugzilla-Command-Line-Stats" title="take em to the Bugzilla Command Line Stats github page" target="_blank">Bugzilla Command Line Stats</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/ihelp" title="Make em to the iHelp jQuery Plugin github page" target="_blank">iHelp jQuery Plugin</a></li>
+                        </ul>
+                    </li>
+                    <li id="search" class="search hidden-phone hidden-tablet">
+                        <span class="icon search"></span>
+                        <input type="text" placeholder="search">
+                        <i id="close" class="icon-remove"></i>
+                        <ol id="search-results" class="dropdown-menu">
+                        </ol>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <div class="container">
+        <div class="content">
+            <div class="row">
+                <div class="span7 columns">
+                    <div class="content">    
+    <div class="row">	
+        <div class="span7 column">
+            <h1>Extending NServiceBus</h1>
+        </div>
+    </div>
+    
+    <div class="row">	
+        <div class="span7 columns">
+            <p><a href="http://nservicebus.com/">NServicecBus</a> is a very popular enterprise service bus (ESB) for the .NET framework. In this article I will analyze the extensibility facility of NSB, what you can do with it and what you can’t. </p>  <p>Suppose for now we have the a very simple application that sends messages from one endpoint to another. We want to extend the NSB framework to do the following:</p>  <ul>   <li>Outgoing message should be checked for confidential information – like credit card numbers – and censored if necessary. </li>    <li>Messages of some specific kind should be augmented with copy right notices. </li>    <li>Some messages should be prevented from being send. As an alternative, a simple notice message should be sent instead. </li>    <li>The outgoing bytes should be compressed and encrypted. </li>    <li>The incoming bytes should be decrypted and decompress before dispatching to the message handlers. </li> </ul>  <p>To achieve those requirements I started analyzing the UnicastBus class, which is responsible to taking the message processing them before sending them using the configured transport. </p>  <p>The first extensible point I found was the IMessageModule interface. Classes that implement this interfaces should implement three functions that represents the three different points in the lifecycle of a message handler. Those functions are executed before processing a message, afterwards and afterwards if a problem happened. The biggest short come of this approach&#160; is that the functions take no parameters. You don’t know which messages are being processed, you don’t have access to the bus to send messages on your own. If you know the <a href="http://msdn.microsoft.com/en-us/magazine/ff872394.aspx">Alexandria</a> application you will be very disappointed.&#160; Cool things like caching responses and sending them when a matched request is sent is not possible. I’m not sure when to use IMessageHanlder interface. The only usage I’m aware of is <a href="http://andreasohlund.blogspot.com/2010/02/nhibernate-session-management-in.html">managing NHibernate sessions</a>.&#160; The plus side of this interfaces is its easy to use. Just inject all implementations in your IoC Container of choice I you’re cool. NServiceBus will retrieve and call them for you. As I figured out, almost all extensibility points works in same way. Just implement an interface, inject the implementation in the container and you’re done.</p>  <p>The second interface that could be used to grant you access to&#160; message processing pipeline is the interface pair IMutateIncomingMessages and IMutateOutgoingMessages. </p>  <p>The IMutateOutgoingMessages interface has only one method:</p>  <pre class="brush: csharp;">IMessage MutateOutgoing(IMessage message);</pre>
+
+<p>As you see you don’t just have write access to the message, you have to return the modified you. This can be used to return a wholly different message.</p>
+
+<p>The following snippet shows how to watch sent messages and censor all messages containing the word “Visa”.</p>
+
+<pre class="brush: csharp;">public IMessage MutateOutgoing(IMessage message)
+{
+    var msg = (message as EventMessage);
+    if (msg == null)
+        return message;
+
+    if (msg.Text.ToLower().Contains(&quot;visa&quot;))
+    {
+        return new CensoredMessage
+                   {
+                       Text = &quot;Message has been censored!&quot;
+                   };
+    }
+    return msg;
+}</pre>
+
+<p>Even though you couldn’t prevent sending the message, you can send a replacement message that do pretty nothing. If you have multiple mutators and you would like to execute them in defined order, just introduce them to the container in the same order. IoC containers usually return items in the same order they we configured in.</p>
+
+<p>Accordingly&#160; IMutateIncopmingMessage do the same to the received messages. </p>
+
+<p>&#160;</p>
+
+<p>What we could not do with those interfaces is compressing the outgoing bytes to spare bandwidth.</p>
+
+<p>To do this you have to use the IMapOutgoingTransportMessages interface. Having single method </p>
+
+<pre class="brush: csharp;">void MapOutgoing(IMessage[] messages, TransportMessage transportMessage)</pre>
+
+<p>it grants you access to original logic messages as well to the serialized bytes.TansportMessage give also an access to the message headers. Those headers could be used to set meta data that can be useful when decompressing the messages.</p>
+
+<p>Using this method we could implement the following compression service</p>
+
+<p>&#160;</p>
+
+<pre class="brush: csharp;">void MapOutgoing(IMessage[] messages, TransportMessage transportMessage)
+{
+
+    if (!ShouldCompressMessage(transportMessage))
+        return;
+
+    transportMessage.Headers[&quot;zipped&quot;] = &quot;1&quot;;
+
+    byte[] output;
+    var inputData = transportMessage.Body;
+
+    using (var inMemoryStream = new MemoryStream(inputData))
+    using (var outMemoryStream = new MemoryStream())
+    {
+        using (var zipStream = new DeflateStream(outMemoryStream, CompressionMode.Compress,leaveOpen: true))
+        {
+            inMemoryStream.WriteTo(zipStream);
+            zipStream.Flush();
+        }
+        output = outMemoryStream.ToArray();
+    }
+    transportMessage.Body = output;
+}
+
+private bool ShouldCompressMessage(TransportMessage transportMessage)
+{
+    return transportMessage.Body.Length &gt; 300;
+}</pre>
+
+<p>Now to the other side of communication. All we have to do to decompress the messages is implementing IMapIncomingTransportMessages, isn’t it? I was very surprised to discover that there is no such an interface. I can’t imagine why there is an IMapOutgoingTransportMessages&#160; interface but no IMapIncomingTransportMessages. I guess it must be on the way. Nevertheless NSB is open source and you can add this interface by your self. Simply by adding the interface and calling its implementations using the container in the right place I could undo the compressing and continue process the message, as if there were no compression at all. </p>
+
+<pre class="brush: csharp;">void MapIncoming(TransportMessage transportMessage)
+{
+    if (!transportMessage.Headers.ContainsKey(&quot;zipped&quot;))
+        return;
+
+    byte[] output;
+    using (var inMemoryStream = new MemoryStream(transportMessage.Body))
+    using (var zipStream = new DeflateStream(inMemoryStream, CompressionMode.Decompress,leaveOpen: true))
+    {
+        using (var strea = new MemoryStream())
+        {
+            zipStream.CopyTo(strea);
+            output = strea.ToArray();
+        }
+    }
+    transportMessage.Body = output;
+    transportMessage.Headers.Remove(&quot;zipped&quot;);
+}</pre>
+
+<p>That’s all, folks.&#160; Using those techniques you can hook your own processing pipeline to the default pipeline of NSB without (big) modifications to the NSB source code. </p>
+
+        </div>
+    </div>
+    
+    <div class="pager hidden-phone hidden-tablet">
+        <a class="prev" href="/2010/08/16/pro-net-4-parallel-programming-in-c-book-review/" title="Previous Post: Pro .NET 4 Parallel Programming in C#. Book Review."><i class="icon-arrow-left icon-white"></i></a>
+        <a class="next" href="" title="Previous Post: "><i class="icon-arrow-right icon-white"></i></a>
+    </div>
+    
+    <div class="row">	
+        <div class="span7 column">
+            <p>
+              <i class="icon-calendar"></i> September 13, 2010
+              | <i class="icon-comment"></i> <a href="/2010/09/13/extending-nservicebus/#disqus_thread" data-disqus-identifier="/2010/09/13/extending-nservicebus/"></a>     
+              <br />
+              <i class="icon-tags"></i> Tags : <a href="/tags/ESB" rel="tooltip" title="View pages tagged with &quot;ESB&quot;"><span class="label label-info">ESB</span></a>     <a href="/tags/extensibility" rel="tooltip" title="View pages tagged with &quot;extensibility&quot;"><span class="label label-info">extensibility</span></a>     <a href="/tags/NServiceBus" rel="tooltip" title="View pages tagged with &quot;NServiceBus&quot;"><span class="label label-info">NServiceBus</span></a>     <a href="/tags/Programming" rel="tooltip" title="View pages tagged with &quot;Programming&quot;"><span class="label label-info">Programming</span></a>   
+              <br />
+              <a href="https://twitter.com/share" class="twitter-share-button" data-via="dermouk">Tweet</a> <g:plusone size="medium"></g:plusone></h5>
+            </p>
+        </div>
+    </div>
+
+    
+    
+    <!-- Twitter -->
+    <script>!function(d,s,id){var js,fjs=d.getElementsByTagName(s)[0];if(!d.getElementById(id)){js=d.createElement(s);js.id=id;js.src="//platform.twitter.com/widgets.js";fjs.parentNode.insertBefore(js,fjs);}}(document,"script","twitter-wjs");</script>
+
+    <!-- Google + -->
+    <script type="text/javascript">
+      (function() {
+        var po = document.createElement('script'); po.type = 'text/javascript'; po.async = true;
+        po.src = 'https://apis.google.com/js/plusone.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(po, s);
+      })();
+    </script>
+</div>
+    
+
+                </div>
+                <div class="span4 columns">
+                     <h2>About Me</h2>
+<p>
+    <img src="http://www.gravatar.com/avatar/dd2dbc41e3babec00f70d4becf4092cf?s=160" alt="Moukarram Kabbash" title="Follow me on Twitter @dermouk"  class="img-rounded floatLeft" />
+    This blog is kept alive by me,  Moukarram Kabbash, a programmer, hobby photographer from Dortmund in Germany.
+</p>					
+<p>
+    <h6>mouk.github.com</h6> <iframe class="github-btn" src="http://ghbtns.com/github-btn.html?user=mouk&repo=mouk.github.com&type=watch&count=true" allowtransparency="true" frameborder="0" scrolling="0" width="80px" height="20px"></iframe>&nbsp;<iframe class="github-btn" src="http://ghbtns.com/github-btn.html?user=mouk&repo=mouk.github.com&type=fork&count=true" allowtransparency="true" frameborder="0" scrolling="0" width="98px" height="20px"></iframe>
+</p>
+<p>
+    <a href="https://twitter.com/dermouk" class="twitter-follow-button" data-link-color="#0069D6" data-show-count="true">Follow @dermouk</a>
+</p>
+<p>
+    <ul class="buttons unstyled">
+        <li><a href="https://github.com/mouk" rel="me" class="social github" title="Go to github.com/mouk" target="_blank"></a></li>
+        <li><a href="http://www.twitter.com/dermouk" rel="me" class="social twitter" title="Go to twitter.com/dermouk" target="_blank"></a></li>
+        <li><a href="https://github.com/mouk/Feedback/issues/new" rel="me" class="social mail" title="Leave feedback for Moukarram Kabbash"  target="_blank"></a></li>				
+    </ul>
+</p>
+                </div>
+                <div class="span4 columns hidden-phone hidden-tablet">
+                     <i class="icon-tags"></i> Tags :<br> <a href="/tags/code" rel="tooltip" title="View posts tagged with &quot;code&quot;"><span class="label label-info">code</span></a>     <a href="/tags/codepaste" rel="tooltip" title="View posts tagged with &quot;codepaste&quot;"><span class="label label-info">codepaste</span></a>     <a href="/tags/comparison" rel="tooltip" title="View posts tagged with &quot;comparison&quot;"><span class="label label-info">comparison</span></a>     <a href="/tags/gist" rel="tooltip" title="View posts tagged with &quot;gist&quot;"><span class="label label-info">gist</span></a>     <a href="/tags/github" rel="tooltip" title="View posts tagged with &quot;github&quot;"><span class="label label-info">github</span></a>     <a href="/tags/paste" rel="tooltip" title="View posts tagged with &quot;paste&quot;"><span class="label label-info">paste</span></a>     <a href="/tags/paste-it" rel="tooltip" title="View posts tagged with &quot;paste-it&quot;"><span class="label label-info">paste-it</span></a>     <a href="/tags/pastebin" rel="tooltip" title="View posts tagged with &quot;pastebin&quot;"><span class="label label-info">pastebin</span></a>     <a href="/tags/pastie" rel="tooltip" title="View posts tagged with &quot;pastie&quot;"><span class="label label-info">pastie</span></a>     <a href="/tags/Programming" rel="tooltip" title="View posts tagged with &quot;Programming&quot;"><span class="label label-info">Programming</span></a>     <a href="/tags/C#" rel="tooltip" title="View posts tagged with &quot;C#&quot;"><span class="label label-info">C#</span></a>     <a href="/tags/Castle" rel="tooltip" title="View posts tagged with &quot;Castle&quot;"><span class="label label-info">Castle</span></a>     <a href="/tags/DSL" rel="tooltip" title="View posts tagged with &quot;DSL&quot;"><span class="label label-info">DSL</span></a>     <a href="/tags/IoC" rel="tooltip" title="View posts tagged with &quot;IoC&quot;"><span class="label label-info">IoC</span></a>     <a href="/tags/IronPython" rel="tooltip" title="View posts tagged with &quot;IronPython&quot;"><span class="label label-info">IronPython</span></a>     <a href="/tags/Windsor" rel="tooltip" title="View posts tagged with &quot;Windsor&quot;"><span class="label label-info">Windsor</span></a>     <a href="/tags/XML" rel="tooltip" title="View posts tagged with &quot;XML&quot;"><span class="label label-info">XML</span></a>     <a href="/tags/Gallio" rel="tooltip" title="View posts tagged with &quot;Gallio&quot;"><span class="label label-info">Gallio</span></a>     <a href="/tags/MSBuild" rel="tooltip" title="View posts tagged with &quot;MSBuild&quot;"><span class="label label-info">MSBuild</span></a>     <a href="/tags/NCover" rel="tooltip" title="View posts tagged with &quot;NCover&quot;"><span class="label label-info">NCover</span></a>     <a href="/tags/NUnit" rel="tooltip" title="View posts tagged with &quot;NUnit&quot;"><span class="label label-info">NUnit</span></a>     <a href="/tags/tdd" rel="tooltip" title="View posts tagged with &quot;tdd&quot;"><span class="label label-info">tdd</span></a>     <a href="/tags/TeamCity" rel="tooltip" title="View posts tagged with &quot;TeamCity&quot;"><span class="label label-info">TeamCity</span></a>     <a href="/tags/Test" rel="tooltip" title="View posts tagged with &quot;Test&quot;"><span class="label label-info">Test</span></a>     <a href="/tags/unit" rel="tooltip" title="View posts tagged with &quot;unit&quot;"><span class="label label-info">unit</span></a>     <a href="/tags/xUnit" rel="tooltip" title="View posts tagged with &quot;xUnit&quot;"><span class="label label-info">xUnit</span></a>     <a href="/tags/CI" rel="tooltip" title="View posts tagged with &quot;CI&quot;"><span class="label label-info">CI</span></a>     <a href="/tags/Task" rel="tooltip" title="View posts tagged with &quot;Task&quot;"><span class="label label-info">Task</span></a>     <a href="/tags/TODO" rel="tooltip" title="View posts tagged with &quot;TODO&quot;"><span class="label label-info">TODO</span></a>     <a href="/tags/Dynamic" rel="tooltip" title="View posts tagged with &quot;Dynamic&quot;"><span class="label label-info">Dynamic</span></a>     <a href="/tags/Challenge" rel="tooltip" title="View posts tagged with &quot;Challenge&quot;"><span class="label label-info">Challenge</span></a>     <a href="/tags/LINQ" rel="tooltip" title="View posts tagged with &quot;LINQ&quot;"><span class="label label-info">LINQ</span></a>     <a href="/tags/combinatorics" rel="tooltip" title="View posts tagged with &quot;combinatorics&quot;"><span class="label label-info">combinatorics</span></a>     <a href="/tags/countdown" rel="tooltip" title="View posts tagged with &quot;countdown&quot;"><span class="label label-info">countdown</span></a>     <a href="/tags/f#" rel="tooltip" title="View posts tagged with &quot;f#&quot;"><span class="label label-info">f#</span></a>     <a href="/tags/permutation" rel="tooltip" title="View posts tagged with &quot;permutation&quot;"><span class="label label-info">permutation</span></a>     <a href="/tags/ESB" rel="tooltip" title="View posts tagged with &quot;ESB&quot;"><span class="label label-info">ESB</span></a>     <a href="/tags/extensibility" rel="tooltip" title="View posts tagged with &quot;extensibility&quot;"><span class="label label-info">extensibility</span></a>     <a href="/tags/NServiceBus" rel="tooltip" title="View posts tagged with &quot;NServiceBus&quot;"><span class="label label-info">NServiceBus</span></a>   
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+  <div class="container">
+	<p class="pull-right"> <a href="/2010/08/16/pro-net-4-parallel-programming-in-c-book-review/" title="Previous Post: Pro .NET 4 Parallel Programming in C#. Book Review.">&laquo; Previous Blog Post</a> 	  |  <a href="#">Back to top</a>  |   </p>        
+	<p>Page last generated on April 15, 2013</p>
+	<p>If need be, <a href="https://github.com/mouk/Feedback/issues/new" title="Leave feedback for Moukarram Kabbash"  target="_blank" >leave me some feedback</a>.</p>	
+	<script>!function(d,s,id){var js,fjs=d.getElementsByTagName(s)[0];if(!d.getElementById(id)){js=d.createElement(s);js.id=id;js.src="//platform.twitter.com/widgets.js";fjs.parentNode.insertBefore(js,fjs);}}(document,"script","twitter-wjs");</script>	
+  </div>
+</footer>
+
+<script type="text/javascript">
+/* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+var disqus_shortname = 'abstractast';
+
+/* * * DON'T EDIT BELOW THIS LINE * * */
+(function () {
+    var s = document.createElement('script'); s.async = true;
+    s.type = 'text/javascript';
+    s.src = 'http://' + disqus_shortname + '.disqus.com/count.js';
+    (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+}());
+</script>
+
+<!-- Google Analytics -->
+<script type="text/javascript">
+
+  var _gaq = _gaq || [];
+  var pluginUrl = '//www.google-analytics.com/plugins/ga/inpage_linkid.js';
+  _gaq.push(['_require', 'inpage_linkid', pluginUrl]);
+  _gaq.push(['_setAccount', 'UA-10348417-1']);
+  _gaq.push(['_setDomainName', 'bstractast.com']);
+  _gaq.push(['_setAllowLinker', true]);
+  
+  _gaq.push(['_trackPageview']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+
+</script>
+  </body>
+</html>

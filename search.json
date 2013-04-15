@@ -1,0 +1,186 @@
+[
+  
+    {
+  "title"    : "Extending NServiceBus",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["ESB","extensibility","NServiceBus","Programming", null],
+  "url"      : "http://mouk.github.io/2010/09/13//",
+  "date"     : {
+    "day"   : "13",
+    "month" : "September",
+    "year"  : "2010"
+  }
+},
+  
+    {
+  "title"    : "Pro .NET 4 Parallel Programming in C#. Book Review.",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["Programming", null],
+  "url"      : "http://mouk.github.io/2010/08/16//",
+  "date"     : {
+    "day"   : "16",
+    "month" : "August",
+    "year"  : "2010"
+  }
+},
+  
+    {
+  "title"    : "Harmful Abstractions",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["Programming", null],
+  "url"      : "http://mouk.github.io/2010/08/09//",
+  "date"     : {
+    "day"   : "09",
+    "month" : "August",
+    "year"  : "2010"
+  }
+},
+  
+    {
+  "title"    : "Solving the Countdown Numbers Problem with F#",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["combinatorics","countdown","f#","permutation","Programming", null],
+  "url"      : "http://mouk.github.io/2010/02/25//",
+  "date"     : {
+    "day"   : "25",
+    "month" : "February",
+    "year"  : "2010"
+  }
+},
+  
+    {
+  "title"    : "A coupon for any Tekpub series to give away",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["Programming", null],
+  "url"      : "http://mouk.github.io/2010/01/10//",
+  "date"     : {
+    "day"   : "10",
+    "month" : "January",
+    "year"  : "2010"
+  }
+},
+  
+    {
+  "title"    : "Mastering LINQ",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["Challenge","LINQ","Programming", null],
+  "url"      : "http://mouk.github.io/2010/01/09//",
+  "date"     : {
+    "day"   : "09",
+    "month" : "January",
+    "year"  : "2010"
+  }
+},
+  
+    {
+  "title"    : "Continuous Integration with TeamCity and MSBuild I",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["CI","MSBuild","TeamCity", null],
+  "url"      : "http://mouk.github.io/2009/09/14//",
+  "date"     : {
+    "day"   : "14",
+    "month" : "September",
+    "year"  : "2009"
+  }
+},
+  
+    {
+  "title"    : "JsonToDynamic: Consuming Json Data as Dynamic Objects in C# 4.0",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["C#","Dynamic","Programming", null],
+  "url"      : "http://mouk.github.io/2009/09/12//",
+  "date"     : {
+    "day"   : "12",
+    "month" : "September",
+    "year"  : "2009"
+  }
+},
+  
+    {
+  "title"    : "Task List Generator",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["CI","MSBuild","Programming","Task","TeamCity","TODO", null],
+  "url"      : "http://mouk.github.io/2009/09/09//",
+  "date"     : {
+    "day"   : "09",
+    "month" : "September",
+    "year"  : "2009"
+  }
+},
+  
+    {
+  "title"    : "Using IronPython to configure Castle Windsor III",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["C#","Castle","DSL","IoC","IronPython","Programming","Windsor", null],
+  "url"      : "http://mouk.github.io/2009/09/05//",
+  "date"     : {
+    "day"   : "05",
+    "month" : "September",
+    "year"  : "2009"
+  }
+},
+  
+    {
+  "title"    : "xUnit.net and running multiple test assemblies",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["Gallio","MSBuild","NCover","NUnit","Programming","tdd","TeamCity","Test","unit","xUnit", null],
+  "url"      : "http://mouk.github.io/2009/09/03//",
+  "date"     : {
+    "day"   : "03",
+    "month" : "September",
+    "year"  : "2009"
+  }
+},
+  
+    {
+  "title"    : "Using IronPython to configure Castle Windsor II",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["C#","Castle","DSL","IronPython","Windsor", null],
+  "url"      : "http://mouk.github.io/2009/08/23//",
+  "date"     : {
+    "day"   : "23",
+    "month" : "August",
+    "year"  : "2009"
+  }
+},
+  
+    {
+  "title"    : "Using IronPython to configure Castle Windsor I",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["C#","Castle","DSL","IoC","IronPython","Programming","Windsor","XML", null],
+  "url"      : "http://mouk.github.io/2009/08/17//",
+  "date"     : {
+    "day"   : "17",
+    "month" : "August",
+    "year"  : "2009"
+  }
+},
+  
+    {
+  "title"    : "Comparison of some popular pastebins",
+  "summary"  : "",
+  "category" : "",
+  "tags"     : ["code","codepaste","comparison","gist","github","paste","paste-it","pastebin","pastie","Programming", null],
+  "url"      : "http://mouk.github.io/2009/08/16//",
+  "date"     : {
+    "day"   : "16",
+    "month" : "August",
+    "year"  : "2009"
+  }
+},
+  
+  null
+]

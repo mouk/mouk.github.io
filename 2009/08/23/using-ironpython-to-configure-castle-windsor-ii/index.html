@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html class="fuelux" lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv='Content-Type' content='text/html; charset=utf-8'>
+    <title>Using IronPython to configure Castle Windsor II</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Technical Web Development Blog">
+    <meta name="author" content="Garry Welding">
+    <script src="/js/all.js" type="text/javascript"></script>
+	<link href="/css/all.css" rel="stylesheet">	
+	
+    <!-- Le HTML5 shim, for IE6-8 support of HTML5 elements -->
+    <!--[if lt IE 9]>
+      <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+
+    <!-- Le fav and touch icons -->
+    <link rel="shortcut icon" href="/favicon.ico">
+  </head>
+  <body data-spy="scroll" data-target=".subnav" data-offset="50">
+    <div class="navbar navbar-fixed-top">
+    <div class="navbar-inner">
+        <div class="container">
+            <a class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse">
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </a>
+            <a class="brand" href="http://mouk.github.io">Abstract AST</a>
+            <div class="nav-collapse">
+                <ul class="nav">
+                    <li class="">
+                        <a href="http://mouk.github.io"><i class="icon-home"></i> Home</a>
+                    </li>
+                    <li class="dropdown">
+                        <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+                            <i class="icon-list"></i> Projects <b class="caret"></b>
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li class=""><a href="https://github.com/gkwelding/WSDLInterpreter" title="take me to the WSDLInterpreter github page" target="_blank">WSDLInterpreter</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/Scene7WSDLPHPWrapper" title="take me to the Scene7WSDLPHPWrapper github page" target="_blank">Adobe Scene7 WSDL PHP Wrapper</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/GoogleMapsV3CI" title="take me to the Google Maps V3 API for CodeIgniter github page" target="_blank">Google Maps V3 API for CodeIgniter</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/MailchimpAPICI" title="take me to the MailChimp API for CodeIgniter github page" target="_blank">MailChimp API for CodeIgniter</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/FuelPHP-Social-Package" title="take em to the FuelPHP Social Package github page" target="_blank">FuelPHP Social Package</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/Bugzilla-Command-Line-Stats" title="take em to the Bugzilla Command Line Stats github page" target="_blank">Bugzilla Command Line Stats</a></li>
+                            <li class=""><a href="https://github.com/gkwelding/ihelp" title="Make em to the iHelp jQuery Plugin github page" target="_blank">iHelp jQuery Plugin</a></li>
+                        </ul>
+                    </li>
+                    <li id="search" class="search hidden-phone hidden-tablet">
+                        <span class="icon search"></span>
+                        <input type="text" placeholder="search">
+                        <i id="close" class="icon-remove"></i>
+                        <ol id="search-results" class="dropdown-menu">
+                        </ol>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <div class="container">
+        <div class="content">
+            <div class="row">
+                <div class="span7 columns">
+                    <div class="content">    
+    <div class="row">	
+        <div class="span7 column">
+            <h1>Using IronPython to configure Castle Windsor II</h1>
+        </div>
+    </div>
+    
+    <div class="row">	
+        <div class="span7 columns">
+            <div style="background-color: #e5e5e5; margin: 10px 40px"> <p style="border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid" align="center"><font color="#004080"><strong>Pysor Series</strong></font></p> <ul> <li> <div style="border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid"><a href="http://abstractast.com/2009/08/using-ironpython-to-configure-castle-windsor/">Using IronPython to configure Castle Windsor I</a> : the basic functionality</div> </li> <li> <div style="border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid"><a href="http://abstractast.com/2009/08/using-ironpython-to-configure-castle-windsor-ii/">Using IronPython to configure Castle Windsor II</a> : parameters and references</div> </li> <li> <div style="border-bottom-style: solid; border-right-style: solid; border-top-style: solid; border-left-style: solid"><a href="http://abstractast.com/2009/09/using-ironpython-to-configure-castle-windsor-iii/">Using IronPython to configure Castle Windsor III</a> : arrays and lists</div> </li> </ul></div>   <p>In the last article I introduced a small Castle Windsor configuration tool using IronPython. This tool enabled us to add service implementation in an easer to read way. On the other hand advanced usages like optional and constructer parameters were not possible.</p>  <p>In this article I will continue developing Pysor (As I called it!) to accept parameters. Before introducing the new functionality I will&#160; show what are parameters and when and how would you want to use them. For the sake of demonstration I will borrow the demo application from the very good <a href="http://dotnetslackers.com/articles/designpatterns/InversionOfControlAndDependencyInjectionWithCastleWindsorContainerPart1.aspx">article</a> series from Simone Busoli about Castle Windsor. If you didn’t read it then go read it all and come back.</p>  <p>The developed application is an html title retriever. It downloads an html string and then extract the title tag from it.&#160; For downloading the the html document it uses an <em>I Downloader</em> service&#160; that accepts an Uri object and downloads it if it can handle the scheme. For Example we have an <em>HtmlDownloader</em>, <em>FileDownloader</em>, etc. The other needed service is <em>ITitleScraper</em> which extract the <em>&lt;title&gt;</em> tag contents.</p>  <div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:f754ed02-33f7-417a-9f65-faf81edf2a0b" class="wlWriterSmartContent">   <pre class="c#" name="code">public interface IFileDownloader
+{
+    string Download(Uri file);
+    bool SupportsUriScheme(Uri file);
+}
+
+public interface ITitleScraper
+{
+    string Scrape(string fileContents);
+}</pre>
+</div>
+
+<p>For the purpose of accelerating the unit tests I changed the downloader to not really download the files but return a fake text instead.</p>
+
+<p>Having the constructor :</p>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:5e84efd9-b0ca-4634-abcd-26071075727e" class="wlWriterSmartContent">
+  <pre class="c#" name="code">public HtmlTitleRetriever(IFileDownloader downloader, ITitleScraper scraper)
+{
+    AdditionalMessage = &quot;&quot;;
+    Downloader = downloader;
+    Scraper = scraper;
+}</pre>
+</div>
+
+<p>with AdditionalMessage as a property indicates a short message, that will be concatenated with retrieved tile, we can now configure the container:</p>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:0f5b62a6-3a79-475d-a2b6-96be6b23a659" class="wlWriterSmartContent">
+  <pre class="py" name="code">add( &quot;parsingScraper&quot; , ITitleScraper, StringParsingTitleScraper)
+	
+add( &quot;HttpFileDownloader&quot;, IFileDownloader, HttpFileDownloader)
+
+add( &quot;retriver&quot;, HtmlTitleRetriever, HtmlTitleRetriever)</pre>
+</div>
+
+<p>And everything works like expected. Now suppose we want to set the <em>AdditionalMessage</em> for each initiated object. Using xml configuration this could be achieved using a parameters tag&#160; containing all parameters in a dictionary-like fashion.</p>
+
+<p>The most appropriate data structure for this purpose in Python would be a hash which is equivalent to a <em>Dictionary</em> in the .Net&#160; world.</p>
+
+<p>Because C# in the current version doesn’t support optional or named parameters and because I don’t&#160; know whether Python supports method overloading I added a Python method with supply the C# method with default value for missing arguments.</p>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:a51ce9fe-6eef-495b-9b6f-eb51f6131871" class="wlWriterSmartContent">
+  <pre class="py" name="code">def add(name, service, impl, params={}):
+	addComponent(name, service, impl, params)</pre>
+</div>
+
+<p>Using this new method you can now set the <em>AdditionalMessage</em> value for each object:</p>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:d3598f7b-8b81-42b0-9743-8a1b488e1c62" class="wlWriterSmartContent">
+  <pre class="py" name="code">add( &quot;retriverWithParam&quot;, HtmlTitleRetriever, HtmlTitleRetriever, 
+	{'AdditionalMessage': &quot;Test&quot;})</pre>
+</div>
+
+<p>We test it with</p>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:d4bb3b25-65d1-4873-9339-7d71140eea40" class="wlWriterSmartContent">
+  <pre class="c#" name="code">[Test]
+public void CanProvideOptionalParameters()
+{
+    var obj = container.Resolve&lt;HtmlTitleRetriever&gt;(&quot;retriverWithParam&quot;);
+    Assert.AreNotEqual(&quot;&quot;, obj.AdditionalMessage);
+}</pre>
+</div>
+
+<p>And of course it works.</p>
+
+<p>Notice that in line 4 we specified the name of the configuration node to use because have added the service HtmlTitleRetriever twice.</p>
+
+<p>The other use of parameters is to specify an implementation for some service to be used.&#160; If you have for example another <em>IDownloader</em> implementation, that retrieves files sing the ftp protocol and we want to use this implementation for the constructor.&#160; In xml we could do it using <em>${name}</em> to reference the name of an already registered service. In Pysor we can use this notation as well. But to make it more like a usual program I modified the <em>add</em> function to return a string to be used whenever you need to reference this implementation.</p>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:ea561955-ec18-4dcf-a257-c094fd4bd558" class="wlWriterSmartContent">
+  <pre class="c#" name="code">Func&lt;string, Type, Type, IDictionary&lt;object, object&gt; , string&gt; action =
+     (name, service, impl, parameters) =&gt;
+         {
+             var pairs = parameters.ToList();
+             var reg = Component
+                 .For(service)
+                 .ImplementedBy(impl)
+                 .Named(name);
+
+             if (pairs.Count &gt; 0)
+             {
+                 var param = (from pair in pairs
+                              select Parameter
+                                 .ForKey(pair.Key.ToString())
+                                 .Eq(pair.Value.ToString())
+                             ).ToArray();
+                 reg = reg.Parameters(param);
+             }
+
+             container.Register(reg);
+             return &quot;${&quot; + name + &quot;}&quot;;
+         };
+
+ //Inject this function into IronPython runtime
+scope.SetVariable(&quot;addComponent&quot;, action);</pre>
+</div>
+
+<p>And the Python wrapper function looks now like:</p>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:2c18f072-fac9-4253-9887-cc45b50742d9" class="wlWriterSmartContent">
+  <pre class="py" name="code">def add(name, service, impl, params={}):
+	return addComponent(name, service, impl, params)</pre>
+</div>
+
+<p>We are now ready to register a retriever that uses a concrete implementation:</p>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:cf9a2113-c617-4c5a-9346-b9e6daf40952" class="wlWriterSmartContent">
+  <pre class="py" name="code">ftp = add( &quot;ftp&quot;, FtpFileDownloader, FtpFileDownloader)
+
+add( &quot;ftpRetriver&quot;, HtmlTitleRetriever, HtmlTitleRetriever, 
+	{'downloader': ftp})</pre>
+</div>
+
+<div style="padding-bottom: 0px; margin: 0px; padding-left: 0px; padding-right: 0px; display: inline; float: none; padding-top: 0px" id="scid:812469c5-0cb0-4c63-8c15-c81123a09de7:53645658-3210-42d6-95fd-87aca0d47629" class="wlWriterSmartContent">
+  <pre class="c#" name="code">[Test]
+public void CanProvideSpecificImplimentationParameters()
+{
+    var obj = container.Resolve&lt;HtmlTitleRetriever&gt;(&quot;ftpRetriver&quot;);
+    Assert.IsInstanceOf&lt;FtpFileDownloader&gt;(obj.Downloader);
+}</pre>
+</div>
+
+<p>We are finished for now.</p>
+
+<h3>&#160;</h3>
+
+<h3>To-do's</h3>
+
+<p>The updated to-do list is now</p>
+
+<ul>
+  <li>Adding a nicer API for referencing assemblies and importing namespaces. </li>
+
+  <li><span style="text-decoration: line-through">Adding parameters to be passed to the constructor.</span> </li>
+
+  <li><span style="text-decoration: line-through">Referencing already registered implementation inside the same configuration script.</span> </li>
+
+  <li>Lifestyle management </li>
+</ul>
+
+<h3>Source Code</h3>
+
+<p>The source code of Pysor is available to download from GitHub</p>
+
+<p><a href="https://github.com/mouk/Pysor/">https://github.com/mouk/Pysor/</a></p>
+
+        </div>
+    </div>
+    
+    <div class="pager hidden-phone hidden-tablet">
+        <a class="prev" href="/2009/08/17/using-ironpython-to-configure-castle-windsor/" title="Previous Post: Using IronPython to configure Castle Windsor I"><i class="icon-arrow-left icon-white"></i></a>
+        <a class="next" href="/2009/09/03/xunit-net-and-running-multiple-test-assemblies/" title="Previous Post: xUnit.net and running multiple test assemblies"><i class="icon-arrow-right icon-white"></i></a>
+    </div>
+    
+    <div class="row">	
+        <div class="span7 column">
+            <p>
+              <i class="icon-calendar"></i> August 23, 2009
+              | <i class="icon-comment"></i> <a href="/2009/08/23/using-ironpython-to-configure-castle-windsor-ii/#disqus_thread" data-disqus-identifier="/2009/08/23/using-ironpython-to-configure-castle-windsor-ii/"></a>     
+              <br />
+              <i class="icon-tags"></i> Tags : <a href="/tags/C#" rel="tooltip" title="View pages tagged with &quot;C#&quot;"><span class="label label-info">C#</span></a>     <a href="/tags/Castle" rel="tooltip" title="View pages tagged with &quot;Castle&quot;"><span class="label label-info">Castle</span></a>     <a href="/tags/DSL" rel="tooltip" title="View pages tagged with &quot;DSL&quot;"><span class="label label-info">DSL</span></a>     <a href="/tags/IronPython" rel="tooltip" title="View pages tagged with &quot;IronPython&quot;"><span class="label label-info">IronPython</span></a>     <a href="/tags/Windsor" rel="tooltip" title="View pages tagged with &quot;Windsor&quot;"><span class="label label-info">Windsor</span></a>   
+              <br />
+              <a href="https://twitter.com/share" class="twitter-share-button" data-via="dermouk">Tweet</a> <g:plusone size="medium"></g:plusone></h5>
+            </p>
+        </div>
+    </div>
+
+    
+    
+    <!-- Twitter -->
+    <script>!function(d,s,id){var js,fjs=d.getElementsByTagName(s)[0];if(!d.getElementById(id)){js=d.createElement(s);js.id=id;js.src="//platform.twitter.com/widgets.js";fjs.parentNode.insertBefore(js,fjs);}}(document,"script","twitter-wjs");</script>
+
+    <!-- Google + -->
+    <script type="text/javascript">
+      (function() {
+        var po = document.createElement('script'); po.type = 'text/javascript'; po.async = true;
+        po.src = 'https://apis.google.com/js/plusone.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(po, s);
+      })();
+    </script>
+</div>
+    
+
+                </div>
+                <div class="span4 columns">
+                     <h2>About Me</h2>
+<p>
+    <img src="http://www.gravatar.com/avatar/dd2dbc41e3babec00f70d4becf4092cf?s=160" alt="Moukarram Kabbash" title="Follow me on Twitter @dermouk"  class="img-rounded floatLeft" />
+    This blog is kept alive by me,  Moukarram Kabbash, a programmer, hobby photographer from Dortmund in Germany.
+</p>					
+<p>
+    <h6>mouk.github.com</h6> <iframe class="github-btn" src="http://ghbtns.com/github-btn.html?user=mouk&repo=mouk.github.com&type=watch&count=true" allowtransparency="true" frameborder="0" scrolling="0" width="80px" height="20px"></iframe>&nbsp;<iframe class="github-btn" src="http://ghbtns.com/github-btn.html?user=mouk&repo=mouk.github.com&type=fork&count=true" allowtransparency="true" frameborder="0" scrolling="0" width="98px" height="20px"></iframe>
+</p>
+<p>
+    <a href="https://twitter.com/dermouk" class="twitter-follow-button" data-link-color="#0069D6" data-show-count="true">Follow @dermouk</a>
+</p>
+<p>
+    <ul class="buttons unstyled">
+        <li><a href="https://github.com/mouk" rel="me" class="social github" title="Go to github.com/mouk" target="_blank"></a></li>
+        <li><a href="http://www.twitter.com/dermouk" rel="me" class="social twitter" title="Go to twitter.com/dermouk" target="_blank"></a></li>
+        <li><a href="https://github.com/mouk/Feedback/issues/new" rel="me" class="social mail" title="Leave feedback for Moukarram Kabbash"  target="_blank"></a></li>				
+    </ul>
+</p>
+                </div>
+                <div class="span4 columns hidden-phone hidden-tablet">
+                     <i class="icon-tags"></i> Tags :<br> <a href="/tags/code" rel="tooltip" title="View posts tagged with &quot;code&quot;"><span class="label label-info">code</span></a>     <a href="/tags/codepaste" rel="tooltip" title="View posts tagged with &quot;codepaste&quot;"><span class="label label-info">codepaste</span></a>     <a href="/tags/comparison" rel="tooltip" title="View posts tagged with &quot;comparison&quot;"><span class="label label-info">comparison</span></a>     <a href="/tags/gist" rel="tooltip" title="View posts tagged with &quot;gist&quot;"><span class="label label-info">gist</span></a>     <a href="/tags/github" rel="tooltip" title="View posts tagged with &quot;github&quot;"><span class="label label-info">github</span></a>     <a href="/tags/paste" rel="tooltip" title="View posts tagged with &quot;paste&quot;"><span class="label label-info">paste</span></a>     <a href="/tags/paste-it" rel="tooltip" title="View posts tagged with &quot;paste-it&quot;"><span class="label label-info">paste-it</span></a>     <a href="/tags/pastebin" rel="tooltip" title="View posts tagged with &quot;pastebin&quot;"><span class="label label-info">pastebin</span></a>     <a href="/tags/pastie" rel="tooltip" title="View posts tagged with &quot;pastie&quot;"><span class="label label-info">pastie</span></a>     <a href="/tags/Programming" rel="tooltip" title="View posts tagged with &quot;Programming&quot;"><span class="label label-info">Programming</span></a>     <a href="/tags/C#" rel="tooltip" title="View posts tagged with &quot;C#&quot;"><span class="label label-info">C#</span></a>     <a href="/tags/Castle" rel="tooltip" title="View posts tagged with &quot;Castle&quot;"><span class="label label-info">Castle</span></a>     <a href="/tags/DSL" rel="tooltip" title="View posts tagged with &quot;DSL&quot;"><span class="label label-info">DSL</span></a>     <a href="/tags/IoC" rel="tooltip" title="View posts tagged with &quot;IoC&quot;"><span class="label label-info">IoC</span></a>     <a href="/tags/IronPython" rel="tooltip" title="View posts tagged with &quot;IronPython&quot;"><span class="label label-info">IronPython</span></a>     <a href="/tags/Windsor" rel="tooltip" title="View posts tagged with &quot;Windsor&quot;"><span class="label label-info">Windsor</span></a>     <a href="/tags/XML" rel="tooltip" title="View posts tagged with &quot;XML&quot;"><span class="label label-info">XML</span></a>     <a href="/tags/Gallio" rel="tooltip" title="View posts tagged with &quot;Gallio&quot;"><span class="label label-info">Gallio</span></a>     <a href="/tags/MSBuild" rel="tooltip" title="View posts tagged with &quot;MSBuild&quot;"><span class="label label-info">MSBuild</span></a>     <a href="/tags/NCover" rel="tooltip" title="View posts tagged with &quot;NCover&quot;"><span class="label label-info">NCover</span></a>     <a href="/tags/NUnit" rel="tooltip" title="View posts tagged with &quot;NUnit&quot;"><span class="label label-info">NUnit</span></a>     <a href="/tags/tdd" rel="tooltip" title="View posts tagged with &quot;tdd&quot;"><span class="label label-info">tdd</span></a>     <a href="/tags/TeamCity" rel="tooltip" title="View posts tagged with &quot;TeamCity&quot;"><span class="label label-info">TeamCity</span></a>     <a href="/tags/Test" rel="tooltip" title="View posts tagged with &quot;Test&quot;"><span class="label label-info">Test</span></a>     <a href="/tags/unit" rel="tooltip" title="View posts tagged with &quot;unit&quot;"><span class="label label-info">unit</span></a>     <a href="/tags/xUnit" rel="tooltip" title="View posts tagged with &quot;xUnit&quot;"><span class="label label-info">xUnit</span></a>     <a href="/tags/CI" rel="tooltip" title="View posts tagged with &quot;CI&quot;"><span class="label label-info">CI</span></a>     <a href="/tags/Task" rel="tooltip" title="View posts tagged with &quot;Task&quot;"><span class="label label-info">Task</span></a>     <a href="/tags/TODO" rel="tooltip" title="View posts tagged with &quot;TODO&quot;"><span class="label label-info">TODO</span></a>     <a href="/tags/Dynamic" rel="tooltip" title="View posts tagged with &quot;Dynamic&quot;"><span class="label label-info">Dynamic</span></a>     <a href="/tags/Challenge" rel="tooltip" title="View posts tagged with &quot;Challenge&quot;"><span class="label label-info">Challenge</span></a>     <a href="/tags/LINQ" rel="tooltip" title="View posts tagged with &quot;LINQ&quot;"><span class="label label-info">LINQ</span></a>     <a href="/tags/combinatorics" rel="tooltip" title="View posts tagged with &quot;combinatorics&quot;"><span class="label label-info">combinatorics</span></a>     <a href="/tags/countdown" rel="tooltip" title="View posts tagged with &quot;countdown&quot;"><span class="label label-info">countdown</span></a>     <a href="/tags/f#" rel="tooltip" title="View posts tagged with &quot;f#&quot;"><span class="label label-info">f#</span></a>     <a href="/tags/permutation" rel="tooltip" title="View posts tagged with &quot;permutation&quot;"><span class="label label-info">permutation</span></a>     <a href="/tags/ESB" rel="tooltip" title="View posts tagged with &quot;ESB&quot;"><span class="label label-info">ESB</span></a>     <a href="/tags/extensibility" rel="tooltip" title="View posts tagged with &quot;extensibility&quot;"><span class="label label-info">extensibility</span></a>     <a href="/tags/NServiceBus" rel="tooltip" title="View posts tagged with &quot;NServiceBus&quot;"><span class="label label-info">NServiceBus</span></a>   
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+  <div class="container">
+	<p class="pull-right"> <a href="/2009/08/17/using-ironpython-to-configure-castle-windsor/" title="Previous Post: Using IronPython to configure Castle Windsor I">&laquo; Previous Blog Post</a> 	  |  <a href="#">Back to top</a>  |   	<a href="/2009/09/03/xunit-net-and-running-multiple-test-assemblies/" title="Next Post: xUnit.net and running multiple test assemblies">Next Blog Post &raquo; </a> 	 </p>        
+	<p>Page last generated on April 15, 2013</p>
+	<p>If need be, <a href="https://github.com/mouk/Feedback/issues/new" title="Leave feedback for Moukarram Kabbash"  target="_blank" >leave me some feedback</a>.</p>	
+	<script>!function(d,s,id){var js,fjs=d.getElementsByTagName(s)[0];if(!d.getElementById(id)){js=d.createElement(s);js.id=id;js.src="//platform.twitter.com/widgets.js";fjs.parentNode.insertBefore(js,fjs);}}(document,"script","twitter-wjs");</script>	
+  </div>
+</footer>
+
+<script type="text/javascript">
+/* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+var disqus_shortname = 'abstractast';
+
+/* * * DON'T EDIT BELOW THIS LINE * * */
+(function () {
+    var s = document.createElement('script'); s.async = true;
+    s.type = 'text/javascript';
+    s.src = 'http://' + disqus_shortname + '.disqus.com/count.js';
+    (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+}());
+</script>
+
+<!-- Google Analytics -->
+<script type="text/javascript">
+
+  var _gaq = _gaq || [];
+  var pluginUrl = '//www.google-analytics.com/plugins/ga/inpage_linkid.js';
+  _gaq.push(['_require', 'inpage_linkid', pluginUrl]);
+  _gaq.push(['_setAccount', 'UA-10348417-1']);
+  _gaq.push(['_setDomainName', 'bstractast.com']);
+  _gaq.push(['_setAllowLinker', true]);
+  
+  _gaq.push(['_trackPageview']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+
+</script>
+  </body>
+</html>
